@@ -3,6 +3,8 @@ package com.embedize.structure;
 import com.embedize.EmbedizePlugin;
 import com.embedize.compat.MultiverseHook;
 import com.embedize.config.PluginConfig;
+import com.embedize.group.GroupManager;
+import com.embedize.group.StructureGroup;
 import io.papermc.paper.registry.RegistryAccess;
 import io.papermc.paper.registry.RegistryKey;
 import org.bukkit.NamespacedKey;
@@ -13,11 +15,12 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.world.AsyncStructureSpawnEvent;
 import org.bukkit.generator.structure.Structure;
 
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Whitelist isolation for datapack structure natural generation.
- * Only worlds in {@code allowed-worlds} may receive managed structures.
+ * Per-group whitelist isolation for datapack structure natural generation.
+ * Vanilla minecraft: structures are never cancelled.
  */
 public final class StructureIsolationListener implements Listener {
 
@@ -37,41 +40,53 @@ public final class StructureIsolationListener implements Listener {
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onStructureSpawn(AsyncStructureSpawnEvent event) {
         IsolationPolicy policy = config.getIsolationPolicy();
+        GroupManager groups = config.getGroupManager();
         if (policy == null || !config.isEnabled()) {
             return;
         }
 
         NamespacedKey key = resolveKey(event.getStructure());
         String namespace = key == null ? null : key.getNamespace();
-        String path = key == null ? null : key.getKey();
         String worldName = event.getWorld().getName();
-        boolean listed = isListedAllowed(worldName, policy);
-        IsolationPolicy.Decision decision = policy.decideWithFlags(namespace, path, listed);
+
+        if (IsolationPolicy.isVanillaNamespace(namespace)) {
+            passed.incrementAndGet();
+            return;
+        }
+
+        Optional<StructureGroup> groupOpt = groups == null
+                ? Optional.empty()
+                : groups.findByNamespace(namespace == null ? "" : namespace);
+
+        boolean hasGroup = groupOpt.isPresent();
+        boolean worldAllowed = false;
+        if (hasGroup) {
+            StructureGroup group = groupOpt.get();
+            worldAllowed = group.allowsWorld(worldName)
+                    || (config.isResolveAliases() && multiverseHook.matchesConfiguredWorld(
+                    worldName, group.getAllowedWorlds(), true));
+        }
+
+        IsolationPolicy.Decision decision = policy.decideWithFlags(namespace, worldAllowed, hasGroup);
 
         switch (decision) {
             case PASS -> passed.incrementAndGet();
             case ALLOW -> {
                 allowed.incrementAndGet();
                 if (config.isDebugCancellations()) {
-                    plugin.getLogger().info("[allow] " + formatKey(key) + " in '" + worldName + "'");
+                    plugin.getLogger().info("[allow] " + formatKey(key) + " in '" + worldName
+                            + "' group=" + groupOpt.map(StructureGroup::getId).orElse("-"));
                 }
             }
             case DENY -> {
                 event.setCancelled(true);
                 long total = cancelled.incrementAndGet();
                 if (config.isDebugCancellations()) {
-                    plugin.getLogger().info("[deny #" + total + "] " + formatKey(key) + " in '" + worldName + "'");
+                    plugin.getLogger().info("[deny #" + total + "] " + formatKey(key) + " in '" + worldName
+                            + "' group=" + groupOpt.map(StructureGroup::getId).orElse("-"));
                 }
             }
         }
-    }
-
-    private boolean isListedAllowed(String worldName, IsolationPolicy policy) {
-        if (policy.isAllowedWorldListed(worldName)) {
-            return true;
-        }
-        return config.isResolveAliases()
-                && multiverseHook.matchesConfiguredWorld(worldName, policy.getAllowedWorlds(), true);
     }
 
     private static String formatKey(NamespacedKey key) {
@@ -87,7 +102,7 @@ public final class StructureIsolationListener implements Listener {
                 return resolved;
             }
         } catch (Throwable ignored) {
-            // Older runtimes / unexpected registry state
+            // ignore
         }
         try {
             return structure.getKey();

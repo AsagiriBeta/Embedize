@@ -23,59 +23,58 @@ import java.util.Locale;
 import java.util.Optional;
 
 /**
- * Downloads Dungeons and Taverns from Modrinth (ARR third-party — not redistributed in the repo).
+ * Downloads structure datapacks from Modrinth (third-party; not redistributed in the repo).
  */
-public final class DntDownloader {
+public final class ModrinthDatapackDownloader {
 
-    private static final String USER_AGENT = "Embedize/1.0 (Paper plugin; +https://modrinth.com/datapack/dungeons-and-taverns)";
+    private static final String USER_AGENT = "Embedize/1.0 (Paper plugin; +https://modrinth.com)";
 
     private final EmbedizePlugin plugin;
-    private final PluginConfig config;
     private final HttpClient httpClient;
 
-    public DntDownloader(EmbedizePlugin plugin, PluginConfig config) {
+    public ModrinthDatapackDownloader(EmbedizePlugin plugin) {
         this.plugin = plugin;
-        this.config = config;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(20))
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .build();
     }
 
-    public Path ensureCached() throws IOException, InterruptedException {
-        Path cacheDir = plugin.getDataFolder().toPath().resolve("cache").resolve("dungeons-and-taverns");
+    public Path ensureCached(PluginConfig.DatapackSource source) throws IOException, InterruptedException {
+        String project = source.modrinthProject();
+        Path cacheDir = plugin.getDataFolder().toPath().resolve("cache").resolve(source.id());
         Files.createDirectories(cacheDir);
 
-        // Manual drop-in support
-        Path manual = plugin.getDataFolder().toPath().resolve("datapacks");
-        if (Files.isDirectory(manual)) {
-            try (var stream = Files.list(manual)) {
+        Path manualDir = plugin.getDataFolder().toPath().resolve("datapacks");
+        if (Files.isDirectory(manualDir)) {
+            try (var stream = Files.list(manualDir)) {
                 Optional<Path> local = stream
                         .filter(p -> {
                             String n = p.getFileName().toString().toLowerCase(Locale.ROOT);
-                            return n.endsWith(".zip") && (n.contains("dungeon") || n.contains("tavern") || n.contains("dnt"));
+                            return n.endsWith(".zip") && (n.contains(source.id().toLowerCase(Locale.ROOT))
+                                    || n.contains(project.toLowerCase(Locale.ROOT).replace(' ', '-')));
                         })
                         .findFirst();
                 if (local.isPresent()) {
-                    plugin.getLogger().info("Using manually provided DnT pack: " + local.get().getFileName());
+                    plugin.getLogger().info("Using manual pack for " + source.id() + ": " + local.get().getFileName());
                     return local.get();
                 }
             }
         }
 
         String serverVersion = detectMinecraftVersion();
-        plugin.getLogger().info("Resolving Dungeons and Taverns for MC " + serverVersion + " from Modrinth...");
+        plugin.getLogger().info("Resolving " + project + " for MC " + serverVersion + " from Modrinth...");
 
-        ModrinthFile chosen = selectVersion(serverVersion)
-                .orElseThrow(() -> new IOException("No matching Dungeons and Taverns datapack found on Modrinth for " + serverVersion));
+        ModrinthFile chosen = selectVersion(project, serverVersion, source)
+                .orElseThrow(() -> new IOException("No matching datapack on Modrinth for " + project + " / " + serverVersion));
 
         Path target = cacheDir.resolve(sanitize(chosen.filename()));
         if (Files.isRegularFile(target) && Files.size(target) > 0) {
-            plugin.getLogger().info("Using cached DnT: " + target.getFileName() + " (" + chosen.versionNumber() + ")");
+            plugin.getLogger().info("Using cached " + source.id() + ": " + target.getFileName());
             return target;
         }
 
-        plugin.getLogger().info("Downloading DnT " + chosen.versionNumber() + " → " + chosen.filename());
+        plugin.getLogger().info("Downloading " + source.id() + " " + chosen.versionNumber());
         HttpRequest request = HttpRequest.newBuilder(URI.create(chosen.url()))
                 .timeout(Duration.ofMinutes(3))
                 .header("User-Agent", USER_AGENT)
@@ -86,12 +85,14 @@ public final class DntDownloader {
             Files.deleteIfExists(target);
             throw new IOException("Modrinth download failed HTTP " + response.statusCode());
         }
-        plugin.getLogger().info("Downloaded DnT to " + target.toAbsolutePath());
         return target;
     }
 
-    private Optional<ModrinthFile> selectVersion(String serverVersion) throws IOException, InterruptedException {
-        String project = config.getDntModrinthProject();
+    private Optional<ModrinthFile> selectVersion(
+            String project,
+            String serverVersion,
+            PluginConfig.DatapackSource source
+    ) throws IOException, InterruptedException {
         String url = "https://api.modrinth.com/v2/project/" + project + "/version";
         HttpRequest request = HttpRequest.newBuilder(URI.create(url))
                 .timeout(Duration.ofSeconds(30))
@@ -109,8 +110,8 @@ public final class DntDownloader {
         for (JsonElement element : versions) {
             JsonObject version = element.getAsJsonObject();
             String versionNumber = version.get("version_number").getAsString();
-            if (config.getPinnedVersion() != null && !config.getPinnedVersion().equalsIgnoreCase(versionNumber)
-                    && !versionNumber.toLowerCase(Locale.ROOT).contains(config.getPinnedVersion().toLowerCase(Locale.ROOT))) {
+            if (source.pinnedVersion() != null
+                    && !versionNumber.toLowerCase(Locale.ROOT).contains(source.pinnedVersion().toLowerCase(Locale.ROOT))) {
                 continue;
             }
 
@@ -122,11 +123,8 @@ public final class DntDownloader {
                     break;
                 }
             }
-            if (!matchesGame && config.getPinnedVersion() == null) {
+            if (!matchesGame && source.pinnedVersion() == null) {
                 continue;
-            }
-            if (!matchesGame && config.getPinnedVersion() != null) {
-                matchesGame = true;
             }
             if (!matchesGame) {
                 continue;
@@ -141,13 +139,13 @@ public final class DntDownloader {
                 boolean primary = file.has("primary") && file.get("primary").getAsBoolean();
                 boolean zip = filename.toLowerCase(Locale.ROOT).endsWith(".zip");
                 boolean jar = filename.toLowerCase(Locale.ROOT).endsWith(".jar");
-                if (config.isPreferDatapackZip() && jar && !zip) {
+                if (source.preferDatapackZip() && jar && !zip) {
                     continue;
                 }
                 ModrinthFile candidate = new ModrinthFile(versionNumber, filename, fileUrl, zip, primary);
                 if (bestFile == null) {
                     bestFile = candidate;
-                } else if (config.isPreferDatapackZip() && candidate.zip() && !bestFile.zip()) {
+                } else if (source.preferDatapackZip() && candidate.zip() && !bestFile.zip()) {
                     bestFile = candidate;
                 } else if (candidate.primary() && !bestFile.primary()) {
                     bestFile = candidate;
@@ -166,13 +164,16 @@ public final class DntDownloader {
     }
 
     public static String detectMinecraftVersion() {
-        String bukkit = BukkitVersionAccess.bukkitVersion();
+        String bukkit = org.bukkit.Bukkit.getBukkitVersion();
         String normalized = VersionUtil.normalizeVersion(bukkit);
         if (!normalized.isBlank() && Character.isDigit(normalized.charAt(0))) {
             return normalized;
         }
-        String minecraft = BukkitVersionAccess.minecraftVersion();
-        return VersionUtil.normalizeVersion(minecraft);
+        try {
+            return VersionUtil.normalizeVersion(org.bukkit.Bukkit.getMinecraftVersion());
+        } catch (NoSuchMethodError err) {
+            return VersionUtil.normalizeVersion(org.bukkit.Bukkit.getVersion());
+        }
     }
 
     private static String sanitize(String filename) {
@@ -180,19 +181,5 @@ public final class DntDownloader {
     }
 
     private record ModrinthFile(String versionNumber, String filename, String url, boolean zip, boolean primary) {
-    }
-
-    static final class BukkitVersionAccess {
-        static String bukkitVersion() {
-            return org.bukkit.Bukkit.getBukkitVersion();
-        }
-
-        static String minecraftVersion() {
-            try {
-                return org.bukkit.Bukkit.getMinecraftVersion();
-            } catch (NoSuchMethodError err) {
-                return org.bukkit.Bukkit.getVersion();
-            }
-        }
     }
 }

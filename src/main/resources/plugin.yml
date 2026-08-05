@@ -4,15 +4,32 @@ main: com.embedize.EmbedizePlugin
 api-version: '1.21'
 folia-supported: true
 authors: [Embedize]
-description: Strictly isolate structure datapack generation to configured Multiverse worlds.
-softdepend: [Multiverse-Core, TerraformGenerator]
+description: Isolate structure datapacks into groups with per-group world whitelists.
+softdepend: [Multiverse-Core, TerraformGenerator, LuckPerms]
 commands:
   embedize:
     description: Embedize admin commands
-    usage: /embedize <reload|status|worlds|install|allow|deny>
+    usage: /embedize <reload|status|worlds|install|group>
     permission: embedize.admin
     aliases: [emb, ez]
 permissions:
   embedize.admin:
-    description: Administer Embedize
+    description: Full Embedize administration
+    default: op
+    children:
+      embedize.group.admin: true
+      embedize.command.reload: true
+      embedize.command.status: true
+      embedize.command.install: true
+  embedize.group.admin:
+    description: Manage all structure groups
+    default: op
+  embedize.command.reload:
+    description: Reload Embedize
+    default: op
+  embedize.command.status:
+    description: View Embedize status
+    default: op
+  embedize.command.install:
+    description: Install datapacks
     default: op

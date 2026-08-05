@@ -1,0 +1,11 @@
+# Embedize structure groups
+# Each group owns structure namespaces and has an independent world whitelist.
+# Edit via /embedize group ... or by hand, then /embedize reload
+
+groups:
+  dungeons:
+    display-name: Dungeons and Taverns
+    namespaces:
+      - nova_structures
+    allowed-worlds:
+      - resource

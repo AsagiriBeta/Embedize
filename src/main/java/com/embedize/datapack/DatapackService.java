@@ -30,13 +30,13 @@ public final class DatapackService {
 
     private final EmbedizePlugin plugin;
     private final PluginConfig config;
-    private final DntDownloader dntDownloader;
+    private final ModrinthDatapackDownloader modrinthDownloader;
     private final AtomicBoolean restartHintPrinted = new AtomicBoolean(false);
 
     public DatapackService(EmbedizePlugin plugin, PluginConfig config) {
         this.plugin = plugin;
         this.config = config;
-        this.dntDownloader = new DntDownloader(plugin, config);
+        this.modrinthDownloader = new ModrinthDatapackDownloader(plugin);
     }
 
     public void ensureInstalled() throws IOException, InterruptedException {
@@ -47,8 +47,11 @@ public final class DatapackService {
         if (config.isInstallTfgBridge()) {
             changed |= installTfgBridge(datapacksDir);
         }
-        if (config.isDntEnabled() && "auto".equalsIgnoreCase(config.getDntInstallMode())) {
-            changed |= installDnt(datapacksDir);
+        for (PluginConfig.DatapackSource source : config.getDatapackSources()) {
+            if (!source.enabled() || !"modrinth".equalsIgnoreCase(source.type())) {
+                continue;
+            }
+            changed |= installModrinthSource(datapacksDir, source);
         }
 
         if (changed) {
@@ -114,11 +117,12 @@ public final class DatapackService {
         return true;
     }
 
-    private boolean installDnt(Path datapacksDir) throws IOException, InterruptedException {
-        Path target = datapacksDir.resolve(DNT_FOLDER);
-        Path marker = target.resolve(".embedize-dnt-source");
+    private boolean installModrinthSource(Path datapacksDir, PluginConfig.DatapackSource source)
+            throws IOException, InterruptedException {
+        Path target = datapacksDir.resolve("embedize-" + source.id());
+        Path marker = target.resolve(".embedize-source");
 
-        Path sourceZip = dntDownloader.ensureCached();
+        Path sourceZip = modrinthDownloader.ensureCached(source);
         String sourceKey = sourceZip.getFileName().toString() + ":" + Files.size(sourceZip);
 
         if (Files.isDirectory(target) && Files.isRegularFile(marker)) {
@@ -134,8 +138,7 @@ public final class DatapackService {
         Files.createDirectories(target);
         unzip(sourceZip, target);
         Files.writeString(marker, sourceKey);
-        plugin.getLogger().info("Installed Dungeons and Taverns datapack → " + target.getFileName()
-                + " (source " + sourceZip.getFileName() + ")");
+        plugin.getLogger().info("Installed datapack '" + source.id() + "' → " + target.getFileName());
         return true;
     }
 
@@ -254,11 +257,14 @@ public final class DatapackService {
         try {
             Path dir = resolveDatapacksDirectory();
             boolean tfg = Files.isDirectory(dir.resolve(TFG_BRIDGE_FOLDER));
-            boolean dnt = Files.isDirectory(dir.resolve(DNT_FOLDER));
+            long installed = 0;
+            try (Stream<Path> stream = Files.list(dir)) {
+                installed = stream.filter(p -> p.getFileName().toString().startsWith("embedize-")).count();
+            }
             return "datapacksDir=" + dir.toAbsolutePath()
                     + " tfgBridge=" + tfg
-                    + " dnt=" + dnt
-                    + " mc=" + DntDownloader.detectMinecraftVersion();
+                    + " embedizePacks=" + installed
+                    + " mc=" + ModrinthDatapackDownloader.detectMinecraftVersion();
         } catch (IOException e) {
             return "error: " + e.getMessage();
         }
@@ -275,12 +281,15 @@ public final class DatapackService {
             }
             changed |= installTfgBridge(datapacksDir);
         }
-        if (config.isDntEnabled()) {
-            Path target = datapacksDir.resolve(DNT_FOLDER);
+        for (PluginConfig.DatapackSource source : config.getDatapackSources()) {
+            if (!source.enabled() || !"modrinth".equalsIgnoreCase(source.type())) {
+                continue;
+            }
+            Path target = datapacksDir.resolve("embedize-" + source.id());
             if (Files.exists(target)) {
                 deleteRecursive(target);
             }
-            changed |= installDnt(datapacksDir);
+            changed |= installModrinthSource(datapacksDir, source);
         }
         if (changed) {
             restartHintPrinted.set(false);

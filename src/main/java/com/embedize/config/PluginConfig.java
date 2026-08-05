@@ -1,140 +1,200 @@
 package com.embedize.config;
 
 import com.embedize.EmbedizePlugin;
+import com.embedize.group.GroupManager;
+import com.embedize.group.StructureGroup;
 import com.embedize.structure.IsolationPolicy;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 
+import java.util.ArrayList;
 import java.util.Collections;
-import java.util.LinkedHashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
-import java.util.Set;
+import java.util.Map;
+import java.util.Optional;
 
 public final class PluginConfig {
+
+    public record DatapackSource(
+            String id,
+            boolean enabled,
+            String type,
+            String modrinthProject,
+            boolean preferDatapackZip,
+            String pinnedVersion,
+            String groupId
+    ) {
+    }
 
     private final EmbedizePlugin plugin;
 
     private boolean enabled;
     private boolean denyUnresolvedKeys;
-    private IsolationPolicy.StructureFilterMode filterMode;
-    private Set<String> allowedWorlds;
-    private Set<String> managedNamespaces;
+    private boolean manageUngrouped;
     private boolean debugCancellations;
     private boolean installTfgBridge;
-    private boolean dntEnabled;
-    private String dntInstallMode;
-    private String dntModrinthProject;
-    private boolean preferDatapackZip;
-    private String pinnedVersion;
     private String installDirectory;
     private boolean resolveAliases;
+    private List<DatapackSource> datapackSources;
     private IsolationPolicy isolationPolicy;
+    private GroupManager groupManager;
 
     public PluginConfig(EmbedizePlugin plugin) {
         this.plugin = plugin;
+    }
+
+    public void setGroupManager(GroupManager groupManager) {
+        this.groupManager = groupManager;
     }
 
     public void reload() {
         FileConfiguration cfg = plugin.getConfig();
         this.enabled = cfg.getBoolean("enabled", true);
         this.denyUnresolvedKeys = cfg.getBoolean("deny-unresolved-structure-keys", false);
-        this.allowedWorlds = toLowerSet(cfg.getStringList("allowed-worlds"));
-
-        ConfigurationSection filter = cfg.getConfigurationSection("structure-filter");
-        String rawMode = filter == null
-                ? cfg.getString("structure-filter-mode", "ALL_NON_MINECRAFT")
-                : filter.getString("mode", "ALL_NON_MINECRAFT");
-        if (rawMode != null && rawMode.trim().equalsIgnoreCase("ALL")) {
-            plugin.getLogger().warning("structure-filter.mode ALL is ignored; vanilla minecraft: "
-                    + "structures are never managed. Using ALL_NON_MINECRAFT.");
-            rawMode = "ALL_NON_MINECRAFT";
-        }
-        this.filterMode = parseFilterMode(rawMode);
-
-        List<String> nsList = filter != null
-                ? filter.getStringList("namespaces")
-                : cfg.getStringList("managed-namespaces");
-        this.managedNamespaces = toLowerSet(nsList);
-        if (managedNamespaces.contains("minecraft")) {
-            plugin.getLogger().warning("Ignoring 'minecraft' in structure-filter.namespaces — "
-                    + "vanilla structures are never managed by Embedize.");
-        }
-        if (managedNamespaces.isEmpty() && filterMode == IsolationPolicy.StructureFilterMode.NAMESPACES) {
-            managedNamespaces = Set.of("nova_structures");
-        }
-
+        this.manageUngrouped = cfg.getBoolean("manage-ungrouped", false);
         this.debugCancellations = cfg.getBoolean("debug-cancellations", false);
+        this.resolveAliases = cfg.getBoolean("multiverse.resolve-aliases", true);
 
         ConfigurationSection packs = cfg.getConfigurationSection("datapacks");
         this.installTfgBridge = packs == null || packs.getBoolean("install-tfg-bridge", true);
         this.installDirectory = packs == null ? "default-world" : packs.getString("install-directory", "default-world");
+        this.datapackSources = parseSources(packs);
 
-        ConfigurationSection dnt = packs == null ? null : packs.getConfigurationSection("dungeons-and-taverns");
-        this.dntEnabled = dnt == null || dnt.getBoolean("enabled", true);
-        this.dntInstallMode = dnt == null ? "auto" : dnt.getString("install", "auto");
-        this.dntModrinthProject = dnt == null ? "dungeons-and-taverns" : dnt.getString("modrinth-project", "dungeons-and-taverns");
-        this.preferDatapackZip = dnt == null || dnt.getBoolean("prefer-datapack-zip", true);
-        this.pinnedVersion = dnt == null ? null : dnt.getString("pinned-version", "");
-        if (pinnedVersion != null && pinnedVersion.isBlank()) {
-            pinnedVersion = null;
-        }
-
-        ConfigurationSection mv = cfg.getConfigurationSection("multiverse");
-        this.resolveAliases = mv == null || mv.getBoolean("resolve-aliases", true);
-
-        this.isolationPolicy = new IsolationPolicy(
-                enabled,
-                filterMode,
-                allowedWorlds,
-                managedNamespaces,
-                denyUnresolvedKeys
-        );
-
-        if (allowedWorlds.isEmpty()) {
-            plugin.getLogger().warning("allowed-worlds is empty — managed structures will generate in NO worlds.");
-        }
+        rebuildIsolationPolicy();
     }
 
-    private static IsolationPolicy.StructureFilterMode parseFilterMode(String raw) {
-        if (raw == null) {
-            return IsolationPolicy.StructureFilterMode.ALL_NON_MINECRAFT;
-        }
-        try {
-            return IsolationPolicy.StructureFilterMode.valueOf(raw.trim().toUpperCase(Locale.ROOT));
-        } catch (IllegalArgumentException ex) {
-            return IsolationPolicy.StructureFilterMode.ALL_NON_MINECRAFT;
-        }
+    public void rebuildIsolationPolicy() {
+        IsolationPolicy.GroupWorldResolver resolver = new IsolationPolicy.GroupWorldResolver() {
+            @Override
+            public Optional<StructureGroup> findGroup(String namespace) {
+                if (groupManager == null) {
+                    return Optional.empty();
+                }
+                return groupManager.findByNamespace(namespace);
+            }
+
+            @Override
+            public boolean isWorldAllowed(StructureGroup group, String worldName) {
+                if (group.allowsWorld(worldName)) {
+                    return true;
+                }
+                if (!resolveAliases || groupManager == null) {
+                    return false;
+                }
+                // Alias check deferred to listener with MultiverseHook; exact name here
+                return false;
+            }
+        };
+        this.isolationPolicy = new IsolationPolicy(enabled, denyUnresolvedKeys, manageUngrouped, resolver);
     }
 
-    private static Set<String> toLowerSet(List<String> values) {
-        Set<String> set = new LinkedHashSet<>();
-        for (String value : values) {
-            if (value != null && !value.isBlank()) {
-                set.add(value.trim().toLowerCase(Locale.ROOT));
+    private List<DatapackSource> parseSources(ConfigurationSection packs) {
+        List<DatapackSource> list = new ArrayList<>();
+        if (packs == null) {
+            return list;
+        }
+        // New multi-source format
+        if (packs.isList("sources")) {
+            List<?> raw = packs.getList("sources");
+            if (raw != null) {
+                int i = 0;
+                for (Object entry : raw) {
+                    if (entry instanceof Map<?, ?> map) {
+                        list.add(fromMap(map, "pack-" + (i++)));
+                    } else if (entry instanceof ConfigurationSection sec) {
+                        list.add(fromSection(sec, "pack-" + (i++)));
+                    }
+                }
             }
         }
-        return Collections.unmodifiableSet(set);
+        ConfigurationSection sourcesSec = packs.getConfigurationSection("sources");
+        if (sourcesSec != null) {
+            for (String key : sourcesSec.getKeys(false)) {
+                ConfigurationSection sec = sourcesSec.getConfigurationSection(key);
+                if (sec != null) {
+                    list.add(fromSection(sec, key));
+                }
+            }
+        }
+        // Legacy single DnT block
+        if (list.isEmpty()) {
+            ConfigurationSection dnt = packs.getConfigurationSection("dungeons-and-taverns");
+            if (dnt == null || dnt.getBoolean("enabled", true)) {
+                list.add(new DatapackSource(
+                        "dungeons-and-taverns",
+                        dnt == null || dnt.getBoolean("enabled", true),
+                        "modrinth",
+                        dnt == null ? "dungeons-and-taverns" : dnt.getString("modrinth-project", "dungeons-and-taverns"),
+                        dnt == null || dnt.getBoolean("prefer-datapack-zip", true),
+                        blankToNull(dnt == null ? null : dnt.getString("pinned-version")),
+                        "default"
+                ));
+            }
+        }
+        return Collections.unmodifiableList(list);
+    }
+
+    private static DatapackSource fromSection(ConfigurationSection sec, String fallbackId) {
+        return new DatapackSource(
+                sec.getString("id", fallbackId),
+                sec.getBoolean("enabled", true),
+                sec.getString("type", "modrinth"),
+                sec.getString("modrinth-project", sec.getString("id", fallbackId)),
+                sec.getBoolean("prefer-datapack-zip", true),
+                blankToNull(sec.getString("pinned-version")),
+                blankToNull(sec.getString("group"))
+        );
+    }
+
+    private static DatapackSource fromMap(Map<?, ?> map, String fallbackId) {
+        Map<String, Object> m = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> e : map.entrySet()) {
+            if (e.getKey() != null) {
+                m.put(String.valueOf(e.getKey()), e.getValue());
+            }
+        }
+        String id = String.valueOf(m.getOrDefault("id", fallbackId));
+        return new DatapackSource(
+                id,
+                asBool(m.get("enabled"), true),
+                String.valueOf(m.getOrDefault("type", "modrinth")),
+                String.valueOf(m.getOrDefault("modrinth-project", id)),
+                asBool(m.get("prefer-datapack-zip"), true),
+                blankToNull(m.get("pinned-version") == null ? null : String.valueOf(m.get("pinned-version"))),
+                blankToNull(m.get("group") == null ? null : String.valueOf(m.get("group")))
+        );
+    }
+
+    private static boolean asBool(Object o, boolean def) {
+        if (o instanceof Boolean b) {
+            return b;
+        }
+        if (o == null) {
+            return def;
+        }
+        return Boolean.parseBoolean(String.valueOf(o));
+    }
+
+    private static String blankToNull(String s) {
+        return s == null || s.isBlank() ? null : s.trim();
     }
 
     public IsolationPolicy getIsolationPolicy() {
         return isolationPolicy;
     }
 
+    public GroupManager getGroupManager() {
+        return groupManager;
+    }
+
     public boolean isEnabled() {
         return enabled;
     }
 
-    public IsolationPolicy.StructureFilterMode getFilterMode() {
-        return filterMode;
-    }
-
-    public Set<String> getConfiguredWorlds() {
-        return allowedWorlds;
-    }
-
-    public Set<String> getManagedNamespaces() {
-        return managedNamespaces;
+    public boolean isManageUngrouped() {
+        return manageUngrouped;
     }
 
     public boolean isDebugCancellations() {
@@ -145,31 +205,49 @@ public final class PluginConfig {
         return installTfgBridge;
     }
 
-    public boolean isDntEnabled() {
-        return dntEnabled;
-    }
-
-    public String getDntInstallMode() {
-        return dntInstallMode;
-    }
-
-    public String getDntModrinthProject() {
-        return dntModrinthProject;
-    }
-
-    public boolean isPreferDatapackZip() {
-        return preferDatapackZip;
-    }
-
-    public String getPinnedVersion() {
-        return pinnedVersion;
-    }
-
     public String getInstallDirectory() {
         return installDirectory;
     }
 
     public boolean isResolveAliases() {
         return resolveAliases;
+    }
+
+    public List<DatapackSource> getDatapackSources() {
+        return datapackSources;
+    }
+
+    // Back-compat accessors used by DatapackService / DntDownloader during transition
+    public boolean isDntEnabled() {
+        return datapackSources.stream().anyMatch(s ->
+                s.enabled() && "dungeons-and-taverns".equalsIgnoreCase(s.id()));
+    }
+
+    public String getDntInstallMode() {
+        return isDntEnabled() ? "auto" : "skip";
+    }
+
+    public String getDntModrinthProject() {
+        return datapackSources.stream()
+                .filter(s -> "dungeons-and-taverns".equalsIgnoreCase(s.id()))
+                .map(DatapackSource::modrinthProject)
+                .findFirst()
+                .orElse("dungeons-and-taverns");
+    }
+
+    public boolean isPreferDatapackZip() {
+        return datapackSources.stream()
+                .filter(s -> "dungeons-and-taverns".equalsIgnoreCase(s.id()))
+                .map(DatapackSource::preferDatapackZip)
+                .findFirst()
+                .orElse(true);
+    }
+
+    public String getPinnedVersion() {
+        return datapackSources.stream()
+                .filter(s -> "dungeons-and-taverns".equalsIgnoreCase(s.id()))
+                .map(DatapackSource::pinnedVersion)
+                .findFirst()
+                .orElse(null);
     }
 }

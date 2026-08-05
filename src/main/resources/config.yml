@@ -1,38 +1,32 @@
-# Embedize — whitelist isolation for structure datapacks
+# Embedize
 #
-# Datapack structures generate ONLY in allowed-worlds.
-# Vanilla minecraft: structures are never touched (any world).
-# Manual /place is unaffected.
+# Datapack structures are managed via groups (see groups.yml).
+# Each group has its own namespaces + allowed-worlds whitelist.
+# Vanilla minecraft: structures are never touched.
 
 enabled: true
 
-# Worlds that MAY receive managed structure datapacks (e.g. DnT).
-allowed-worlds:
-  - resource
+# If a structure namespace is not in any group:
+#   false = leave alone (PASS)
+#   true  = deny in all worlds
+manage-ungrouped: false
 
-# Which datapack structures Embedize manages:
-#   ALL_NON_MINECRAFT — all non-vanilla namespaces (recommended)
-#   NAMESPACES        — only the listed namespaces
-structure-filter:
-  mode: ALL_NON_MINECRAFT
-  namespaces:
-    - nova_structures
-
-# If true, cancel when structure key cannot be resolved. Default false = leave alone.
 deny-unresolved-structure-keys: false
-
 debug-cancellations: false
 
 datapacks:
   install-tfg-bridge: true
-
-  dungeons-and-taverns:
-    enabled: true
-    install: auto
-    modrinth-project: dungeons-and-taverns
-    prefer-datapack-zip: true
-
   install-directory: default-world
+
+  # Multiple structure datapacks can be listed here (Modrinth download / install).
+  # Link them to a group id from groups.yml via "group".
+  sources:
+    dungeons-and-taverns:
+      enabled: true
+      type: modrinth
+      modrinth-project: dungeons-and-taverns
+      prefer-datapack-zip: true
+      group: dungeons
 
 multiverse:
   resolve-aliases: true
