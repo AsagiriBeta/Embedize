@@ -16,11 +16,8 @@ import org.bukkit.generator.structure.Structure;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Enforces strict per-world isolation for datapack structures (any namespace, not only DnT).
- *
- * <p>Datapacks register structures globally. Embedize cancels natural placement through
- * {@link AsyncStructureSpawnEvent} so managed structures cannot leak into sealed or
- * non-allowed worlds (e.g. default {@code world} when only {@code resource} is allowed).</p>
+ * Whitelist isolation for datapack structure natural generation.
+ * Only worlds in {@code allowed-worlds} may receive managed structures.
  */
 public final class StructureIsolationListener implements Listener {
 
@@ -37,9 +34,6 @@ public final class StructureIsolationListener implements Listener {
         this.multiverseHook = new MultiverseHook(plugin.getLogger());
     }
 
-    /**
-     * Priority HIGHEST so isolation wins over most plugins. We only cancel (never force-allow).
-     */
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onStructureSpawn(AsyncStructureSpawnEvent event) {
         IsolationPolicy policy = config.getIsolationPolicy();
@@ -51,10 +45,8 @@ public final class StructureIsolationListener implements Listener {
         String namespace = key == null ? null : key.getNamespace();
         String path = key == null ? null : key.getKey();
         String worldName = event.getWorld().getName();
-
-        boolean sealed = isSealed(worldName, policy);
         boolean listed = isListedAllowed(worldName, policy);
-        IsolationPolicy.Decision decision = policy.decideWithFlags(namespace, path, sealed, listed);
+        IsolationPolicy.Decision decision = policy.decideWithFlags(namespace, path, listed);
 
         switch (decision) {
             case PASS -> passed.incrementAndGet();
@@ -68,19 +60,10 @@ public final class StructureIsolationListener implements Listener {
                 event.setCancelled(true);
                 long total = cancelled.incrementAndGet();
                 if (config.isDebugCancellations()) {
-                    plugin.getLogger().info("[deny #" + total + "] " + formatKey(key) + " in '" + worldName
-                            + "' sealed=" + sealed + " listed=" + listed);
+                    plugin.getLogger().info("[deny #" + total + "] " + formatKey(key) + " in '" + worldName + "'");
                 }
             }
         }
-    }
-
-    private boolean isSealed(String worldName, IsolationPolicy policy) {
-        if (policy.isSealedWorld(worldName)) {
-            return true;
-        }
-        return config.isResolveAliases()
-                && multiverseHook.matchesConfiguredWorld(worldName, policy.getSealedWorlds(), true);
     }
 
     private boolean isListedAllowed(String worldName, IsolationPolicy policy) {

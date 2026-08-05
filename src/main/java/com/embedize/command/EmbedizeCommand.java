@@ -77,63 +77,41 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter {
         return true;
     }
 
-    private void mutateWorldList(CommandSender sender, String[] args, boolean allowSubcommand) {
+    private void mutateWorldList(CommandSender sender, String[] args, boolean add) {
         if (args.length < 2) {
-            sender.sendMessage(Component.text("Usage: /embedize " + (allowSubcommand ? "allow" : "deny") + " <world>", NamedTextColor.RED));
+            sender.sendMessage(Component.text("Usage: /embedize " + (add ? "allow" : "deny") + " <world>", NamedTextColor.RED));
             return;
         }
         String world = args[1];
-        IsolationPolicy.Mode mode = plugin.getPluginConfig().getMode();
         List<String> list = new ArrayList<>(plugin.getConfig().getStringList("allowed-worlds"));
-
-        if (allowSubcommand) {
-            // Ensure world is allowed under current mode
-            if (mode == IsolationPolicy.Mode.ALLOWLIST) {
-                if (list.stream().noneMatch(w -> w.equalsIgnoreCase(world))) {
-                    list.add(world);
-                }
-            } else {
-                list.removeIf(w -> w.equalsIgnoreCase(world));
+        if (add) {
+            if (list.stream().noneMatch(w -> w.equalsIgnoreCase(world))) {
+                list.add(world);
             }
         } else {
-            if (mode == IsolationPolicy.Mode.ALLOWLIST) {
-                list.removeIf(w -> w.equalsIgnoreCase(world));
-            } else {
-                if (list.stream().noneMatch(w -> w.equalsIgnoreCase(world))) {
-                    list.add(world);
-                }
-            }
+            list.removeIf(w -> w.equalsIgnoreCase(world));
         }
-
         plugin.getConfig().set("allowed-worlds", list);
         plugin.saveConfig();
         plugin.reloadPlugin();
-        sender.sendMessage(Component.text("Updated world list: " + list, NamedTextColor.GREEN));
+        sender.sendMessage(Component.text("allowed-worlds: " + list, NamedTextColor.GREEN));
     }
 
     private void sendStatus(CommandSender sender) {
         PluginConfig cfg = plugin.getPluginConfig();
         StructureIsolationListener listener = plugin.getIsolationListener();
         MultiverseHook hook = listener.getMultiverseHook();
-        IsolationPolicy policy = cfg.getIsolationPolicy();
 
         sender.sendMessage(Component.text("--- Embedize ---", NamedTextColor.GOLD));
         sender.sendMessage(Component.text("enabled: " + cfg.isEnabled()
-                + "  strict: " + cfg.isStrictIsolation()
-                + "  mode: " + cfg.getMode(), NamedTextColor.GRAY));
-        sender.sendMessage(Component.text("filter: " + cfg.getFilterMode()
-                + "  namespaces: " + cfg.getManagedNamespaces(), NamedTextColor.GRAY));
+                + "  filter: " + cfg.getFilterMode(), NamedTextColor.GRAY));
         sender.sendMessage(Component.text("allowed-worlds: " + cfg.getConfiguredWorlds(), NamedTextColor.GRAY));
-        sender.sendMessage(Component.text("sealed-worlds: " + cfg.getSealedWorlds(), NamedTextColor.GRAY));
+        sender.sendMessage(Component.text("namespaces: " + cfg.getManagedNamespaces(), NamedTextColor.GRAY));
         sender.sendMessage(Component.text("allowed: " + listener.getAllowedCount()
                 + "  denied: " + listener.getCancelledCount()
                 + "  passed(unmanaged): " + listener.getPassedCount(), NamedTextColor.GRAY));
         sender.sendMessage(Component.text("Multiverse-Core: " + (hook.isPresent() ? "yes" : "no")
                 + "  TerraformGenerator: " + (hook.isTerraformGeneratorPresent() ? "yes" : "no"), NamedTextColor.GRAY));
-        if (policy != null) {
-            sender.sendMessage(Component.text("policy worlds allow=" + policy.getAllowedWorlds()
-                    + " sealed=" + policy.getSealedWorlds(), NamedTextColor.DARK_GRAY));
-        }
         sender.sendMessage(Component.text(plugin.getDatapackService().statusSummary(), NamedTextColor.DARK_AQUA));
     }
 
@@ -141,21 +119,16 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter {
         PluginConfig cfg = plugin.getPluginConfig();
         MultiverseHook hook = plugin.getIsolationListener().getMultiverseHook();
         IsolationPolicy policy = cfg.getIsolationPolicy();
-        sender.sendMessage(Component.text("Loaded worlds vs isolation (managed structures):", NamedTextColor.GOLD));
+        sender.sendMessage(Component.text("Loaded worlds (whitelist):", NamedTextColor.GOLD));
         for (World world : Bukkit.getWorlds()) {
-            boolean sealed = policy.isSealedWorld(world.getName())
-                    || (cfg.isResolveAliases() && hook.matchesConfiguredWorld(
-                    world.getName(), policy.getSealedWorlds(), true));
             boolean listed = policy.isAllowedWorldListed(world.getName())
                     || (cfg.isResolveAliases() && hook.matchesConfiguredWorld(
                     world.getName(), policy.getAllowedWorlds(), true));
-            IsolationPolicy.Decision sample = policy.decideWithFlags(
-                    "nova_structures", "sample", sealed, listed);
+            IsolationPolicy.Decision sample = policy.decideWithFlags("nova_structures", "sample", listed);
             boolean willGenerate = sample == IsolationPolicy.Decision.ALLOW;
             String gen = world.getGenerator() == null ? "vanilla" : world.getGenerator().getClass().getSimpleName();
             sender.sendMessage(Component.text(
                     " - " + world.getName() + " [" + world.getEnvironment() + "] gen=" + gen
-                            + " sealed=" + sealed + " listed=" + listed
                             + " → " + (willGenerate ? "YES" : "NO"),
                     willGenerate ? NamedTextColor.GREEN : NamedTextColor.DARK_GRAY
             ));

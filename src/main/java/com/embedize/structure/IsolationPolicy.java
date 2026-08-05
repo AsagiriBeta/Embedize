@@ -6,19 +6,10 @@ import java.util.Objects;
 import java.util.Set;
 
 /**
- * Fail-closed isolation decisions. Pure logic — no Bukkit dependency.
- *
- * <p>ALLOWLIST + strict mode means: a managed structure may place blocks ONLY when the
- * world is explicitly allowed AND not sealed. Default/main worlds never receive managed
- * datapack structures unless the operator removes them from {@code sealed-worlds} and
- * also lists them in {@code allowed-worlds}.</p>
+ * Whitelist-only isolation: managed structures generate ONLY in {@code allowed-worlds}.
+ * Every other world is denied. Unmanaged namespaces are left alone ({@link Decision#PASS}).
  */
 public final class IsolationPolicy {
-
-    public enum Mode {
-        ALLOWLIST,
-        DENYLIST
-    }
 
     public enum StructureFilterMode {
         /** Only configured namespaces (e.g. nova_structures, my_pack). */
@@ -32,37 +23,28 @@ public final class IsolationPolicy {
     public enum Decision {
         /** Not managed by Embedize — leave vanilla/other plugins alone. */
         PASS,
-        /** Managed and allowed in this world — let generation proceed. */
+        /** Managed and world is on the whitelist — let generation proceed. */
         ALLOW,
-        /** Managed and forbidden in this world — cancel generation. */
+        /** Managed and world is not on the whitelist — cancel generation. */
         DENY
     }
 
     private final boolean enabled;
-    private final boolean strict;
-    private final Mode mode;
     private final StructureFilterMode filterMode;
     private final Set<String> allowedWorlds;
-    private final Set<String> sealedWorlds;
     private final Set<String> namespaces;
     private final boolean denyUnresolvedKeys;
 
     public IsolationPolicy(
             boolean enabled,
-            boolean strict,
-            Mode mode,
             StructureFilterMode filterMode,
             Set<String> allowedWorlds,
-            Set<String> sealedWorlds,
             Set<String> namespaces,
             boolean denyUnresolvedKeys
     ) {
         this.enabled = enabled;
-        this.strict = strict;
-        this.mode = Objects.requireNonNull(mode);
         this.filterMode = Objects.requireNonNull(filterMode);
         this.allowedWorlds = Set.copyOf(normalize(allowedWorlds));
-        this.sealedWorlds = Set.copyOf(normalize(sealedWorlds));
         this.namespaces = Set.copyOf(normalize(namespaces));
         this.denyUnresolvedKeys = denyUnresolvedKeys;
     }
@@ -71,40 +53,33 @@ public final class IsolationPolicy {
         if (!enabled) {
             return Decision.PASS;
         }
-
         if (namespace == null || namespace.isBlank()) {
-            // Unknown identity: in strict mode fail closed when configured to do so
-            return (strict && denyUnresolvedKeys) ? Decision.DENY : Decision.PASS;
+            return denyUnresolvedKeys ? Decision.DENY : Decision.PASS;
         }
-
         if (!isManagedNamespace(namespace)) {
             return Decision.PASS;
         }
-
         String world = normalizeOne(worldName);
         if (world == null) {
-            return strict ? Decision.DENY : Decision.PASS;
-        }
-
-        // Sealed worlds are an absolute ban for managed structures (strict isolation).
-        if (sealedWorlds.contains(world)) {
             return Decision.DENY;
         }
+        return allowedWorlds.contains(world) ? Decision.ALLOW : Decision.DENY;
+    }
 
-        boolean listed = allowedWorlds.contains(world);
-        boolean allow = mode == Mode.ALLOWLIST ? listed : !listed;
-
-        // Fail-closed: empty allowlist in ALLOWLIST mode denies everywhere (except PASS for unmanaged).
-        if (mode == Mode.ALLOWLIST && allowedWorlds.isEmpty()) {
-            allow = false;
+    /**
+     * Whitelist check with Multiverse alias resolution already folded into {@code listed}.
+     */
+    public Decision decideWithFlags(String namespace, String key, boolean listed) {
+        if (namespace == null || namespace.isBlank()) {
+            return denyUnresolvedKeys ? Decision.DENY : Decision.PASS;
         }
-
-        // Strict ALLOWLIST: must be explicitly listed; no fuzzy fallback.
-        if (strict && mode == Mode.ALLOWLIST && !listed) {
-            allow = false;
+        if (!isManagedNamespace(namespace)) {
+            return Decision.PASS;
         }
-
-        return allow ? Decision.ALLOW : Decision.DENY;
+        if (allowedWorlds.isEmpty()) {
+            return Decision.DENY;
+        }
+        return listed ? Decision.ALLOW : Decision.DENY;
     }
 
     public boolean isManagedNamespace(String namespace) {
@@ -119,18 +94,9 @@ public final class IsolationPolicy {
         };
     }
 
-    public boolean isSealedWorld(String worldName) {
-        String world = normalizeOne(worldName);
-        return world != null && sealedWorlds.contains(world);
-    }
-
     public boolean isAllowedWorldListed(String worldName) {
         String world = normalizeOne(worldName);
         return world != null && allowedWorlds.contains(world);
-    }
-
-    public Mode getMode() {
-        return mode;
     }
 
     public StructureFilterMode getFilterMode() {
@@ -141,41 +107,8 @@ public final class IsolationPolicy {
         return allowedWorlds;
     }
 
-    public Set<String> getSealedWorlds() {
-        return sealedWorlds;
-    }
-
     public Set<String> getNamespaces() {
         return namespaces;
-    }
-
-    public boolean isStrict() {
-        return strict;
-    }
-
-    /**
-     * Alias-aware decision using sealed/listed flags (computed by the listener with Multiverse aliases).
-     * Fail-closed: managed + not listed → DENY; sealed always DENY for managed.
-     */
-    public Decision decideWithFlags(String namespace, String key, boolean sealed, boolean listed) {
-        if (namespace == null || namespace.isBlank()) {
-            return decide("unresolved-world", null, key);
-        }
-        if (!isManagedNamespace(namespace)) {
-            return Decision.PASS;
-        }
-        if (sealed) {
-            return Decision.DENY;
-        }
-        return switch (mode) {
-            case ALLOWLIST -> {
-                if (allowedWorlds.isEmpty()) {
-                    yield Decision.DENY;
-                }
-                yield listed ? Decision.ALLOW : Decision.DENY;
-            }
-            case DENYLIST -> listed ? Decision.DENY : Decision.ALLOW;
-        };
     }
 
     private static String normalizeOne(String value) {

@@ -41,8 +41,7 @@ public final class EmbedizePlugin extends JavaPlugin {
             }
         });
 
-        getLogger().info("Embedize enabled. Mode=" + pluginConfig.getMode()
-                + " worlds=" + pluginConfig.getConfiguredWorlds());
+        getLogger().info("Embedize enabled. allowed-worlds=" + pluginConfig.getConfiguredWorlds());
     }
 
     @Override
@@ -65,7 +64,6 @@ public final class EmbedizePlugin extends JavaPlugin {
     public void reloadPlugin() {
         reloadConfig();
         pluginConfig.reload();
-        getLogger().info("Configuration reloaded. Mode=" + pluginConfig.getMode()
-                + " worlds=" + pluginConfig.getConfiguredWorlds());
+        getLogger().info("Configuration reloaded. allowed-worlds=" + pluginConfig.getConfiguredWorlds());
     }
 }

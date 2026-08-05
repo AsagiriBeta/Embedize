@@ -1,46 +1,26 @@
-# Embedize — strict per-world isolation for structure datapacks
+# Embedize — whitelist isolation for structure datapacks
 #
-# Minecraft registers datapack structures globally. Embedize cancels natural
-# placement in worlds that are not explicitly allowed, so packs cannot leak
-# into default dimensions (e.g. only generate in "resource", never in "world").
+# Managed structures naturally generate ONLY in allowed-worlds.
+# All other worlds are denied. Manual /place is unaffected.
 
 enabled: true
 
-# Fail-closed isolation (recommended). ALLOWLIST + sealed worlds = strict gate.
-strict-isolation: true
-
-# If a structure key cannot be resolved, deny placement when strict-isolation is on.
-deny-unresolved-structure-keys: true
-
-# Isolation mode:
-#   ALLOWLIST - managed structures ONLY in allowed-worlds (and never in sealed-worlds)
-#   DENYLIST  - managed structures everywhere EXCEPT allowed-worlds / sealed-worlds
-mode: ALLOWLIST
-
-# Worlds where managed structures MAY generate (ALLOWLIST).
-# Example: Multiverse world "resource" with TerraformGenerator.
+# Worlds that MAY receive managed structure datapacks.
+# Example: only "resource" → default "world" gets nothing.
 allowed-worlds:
   - resource
 
-# Absolute ban list — managed structures NEVER generate here, even if listed above.
-# auto-seal-default-level also adds level-name + _nether/_the_end and world*.
-sealed-worlds:
-  - world
-  - world_nether
-  - world_the_end
-
-# Automatically seal the server level-name (and nether/end suffixes).
-auto-seal-default-level: true
-
-# Which structures Embedize manages:
-#   ALL_NON_MINECRAFT — all datapack/modded namespaces (recommended for wide pack support)
+# Which structures are managed:
+#   ALL_NON_MINECRAFT — all non-vanilla namespaces (recommended)
 #   NAMESPACES        — only the listed namespaces
 #   ALL               — including vanilla minecraft: structures
 structure-filter:
   mode: ALL_NON_MINECRAFT
-  # Used when mode is NAMESPACES (also handy as documentation of known packs):
   namespaces:
     - nova_structures
+
+# If a structure key cannot be resolved, deny placement (fail-closed).
+deny-unresolved-structure-keys: true
 
 # Verbose per-structure allow/deny logging (spammy on busy servers).
 debug-cancellations: false
