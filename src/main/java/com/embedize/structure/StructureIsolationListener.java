@@ -13,12 +13,14 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.world.AsyncStructureSpawnEvent;
 import org.bukkit.generator.structure.Structure;
 
-import java.util.Locale;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
- * Cancels managed datapack structures outside (or inside) configured worlds.
- * This isolates global datapack structure generation to selected Multiverse dimensions.
+ * Enforces strict per-world isolation for datapack structures (any namespace, not only DnT).
+ *
+ * <p>Datapacks register structures globally. Embedize cancels natural placement through
+ * {@link AsyncStructureSpawnEvent} so managed structures cannot leak into sealed or
+ * non-allowed worlds (e.g. default {@code world} when only {@code resource} is allowed).</p>
  */
 public final class StructureIsolationListener implements Listener {
 
@@ -27,6 +29,7 @@ public final class StructureIsolationListener implements Listener {
     private final MultiverseHook multiverseHook;
     private final AtomicLong cancelled = new AtomicLong();
     private final AtomicLong allowed = new AtomicLong();
+    private final AtomicLong passed = new AtomicLong();
 
     public StructureIsolationListener(EmbedizePlugin plugin, PluginConfig config) {
         this.plugin = plugin;
@@ -34,45 +37,71 @@ public final class StructureIsolationListener implements Listener {
         this.multiverseHook = new MultiverseHook(plugin.getLogger());
     }
 
-    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
+    /**
+     * Priority HIGHEST so isolation wins over most plugins. We only cancel (never force-allow).
+     */
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)
     public void onStructureSpawn(AsyncStructureSpawnEvent event) {
-        if (!config.isEnabled()) {
+        IsolationPolicy policy = config.getIsolationPolicy();
+        if (policy == null || !config.isEnabled()) {
             return;
         }
 
-        Structure structure = event.getStructure();
-        NamespacedKey key = resolveKey(structure);
-        if (key == null || !isManaged(key)) {
-            return;
-        }
-
+        NamespacedKey key = resolveKey(event.getStructure());
+        String namespace = key == null ? null : key.getNamespace();
+        String path = key == null ? null : key.getKey();
         String worldName = event.getWorld().getName();
-        boolean worldMatches = multiverseHook.matchesConfiguredWorld(
-                worldName,
-                config.getConfiguredWorlds(),
-                config.isResolveAliases()
-        );
 
-        boolean allow = config.getMode() == PluginConfig.Mode.ALLOWLIST ? worldMatches : !worldMatches;
-        if (allow) {
-            allowed.incrementAndGet();
-            return;
-        }
+        boolean sealed = isSealed(worldName, policy);
+        boolean listed = isListedAllowed(worldName, policy);
+        IsolationPolicy.Decision decision = policy.decideWithFlags(namespace, path, sealed, listed);
 
-        event.setCancelled(true);
-        long total = cancelled.incrementAndGet();
-        if (config.isDebugCancellations()) {
-            plugin.getLogger().info("[cancel #" + total + "] " + key + " in world '" + worldName + "'");
+        switch (decision) {
+            case PASS -> passed.incrementAndGet();
+            case ALLOW -> {
+                allowed.incrementAndGet();
+                if (config.isDebugCancellations()) {
+                    plugin.getLogger().info("[allow] " + formatKey(key) + " in '" + worldName + "'");
+                }
+            }
+            case DENY -> {
+                event.setCancelled(true);
+                long total = cancelled.incrementAndGet();
+                if (config.isDebugCancellations()) {
+                    plugin.getLogger().info("[deny #" + total + "] " + formatKey(key) + " in '" + worldName
+                            + "' sealed=" + sealed + " listed=" + listed);
+                }
+            }
         }
+    }
+
+    private boolean isSealed(String worldName, IsolationPolicy policy) {
+        if (policy.isSealedWorld(worldName)) {
+            return true;
+        }
+        return config.isResolveAliases()
+                && multiverseHook.matchesConfiguredWorld(worldName, policy.getSealedWorlds(), true);
+    }
+
+    private boolean isListedAllowed(String worldName, IsolationPolicy policy) {
+        if (policy.isAllowedWorldListed(worldName)) {
+            return true;
+        }
+        return config.isResolveAliases()
+                && multiverseHook.matchesConfiguredWorld(worldName, policy.getAllowedWorlds(), true);
+    }
+
+    private static String formatKey(NamespacedKey key) {
+        return key == null ? "<unresolved>" : key.toString();
     }
 
     @SuppressWarnings("removal")
     private static NamespacedKey resolveKey(Structure structure) {
         try {
             Registry<Structure> registry = RegistryAccess.registryAccess().getRegistry(RegistryKey.STRUCTURE);
-            NamespacedKey key = registry.getKey(structure);
-            if (key != null) {
-                return key;
+            NamespacedKey resolved = registry.getKey(structure);
+            if (resolved != null) {
+                return resolved;
             }
         } catch (Throwable ignored) {
             // Older runtimes / unexpected registry state
@@ -84,16 +113,16 @@ public final class StructureIsolationListener implements Listener {
         }
     }
 
-    private boolean isManaged(NamespacedKey key) {
-        return config.getManagedNamespaces().contains(key.getNamespace().toLowerCase(Locale.ROOT));
-    }
-
     public long getCancelledCount() {
         return cancelled.get();
     }
 
     public long getAllowedCount() {
         return allowed.get();
+    }
+
+    public long getPassedCount() {
+        return passed.get();
     }
 
     public MultiverseHook getMultiverseHook() {

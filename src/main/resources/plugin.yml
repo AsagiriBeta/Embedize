@@ -4,7 +4,7 @@ main: com.embedize.EmbedizePlugin
 api-version: '1.21'
 folia-supported: true
 authors: [Embedize]
-description: Isolate datapack structure generation (e.g. Dungeons and Taverns) to configured Multiverse worlds.
+description: Strictly isolate structure datapack generation to configured Multiverse worlds.
 softdepend: [Multiverse-Core, TerraformGenerator]
 commands:
   embedize:

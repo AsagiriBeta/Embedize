@@ -3,6 +3,7 @@ package com.embedize.command;
 import com.embedize.EmbedizePlugin;
 import com.embedize.compat.MultiverseHook;
 import com.embedize.config.PluginConfig;
+import com.embedize.structure.IsolationPolicy;
 import com.embedize.structure.StructureIsolationListener;
 import com.embedize.util.SchedulerUtil;
 import net.kyori.adventure.text.Component;
@@ -82,12 +83,12 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter {
             return;
         }
         String world = args[1];
-        PluginConfig.Mode mode = plugin.getPluginConfig().getMode();
+        IsolationPolicy.Mode mode = plugin.getPluginConfig().getMode();
         List<String> list = new ArrayList<>(plugin.getConfig().getStringList("allowed-worlds"));
 
         if (allowSubcommand) {
             // Ensure world is allowed under current mode
-            if (mode == PluginConfig.Mode.ALLOWLIST) {
+            if (mode == IsolationPolicy.Mode.ALLOWLIST) {
                 if (list.stream().noneMatch(w -> w.equalsIgnoreCase(world))) {
                     list.add(world);
                 }
@@ -95,7 +96,7 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter {
                 list.removeIf(w -> w.equalsIgnoreCase(world));
             }
         } else {
-            if (mode == PluginConfig.Mode.ALLOWLIST) {
+            if (mode == IsolationPolicy.Mode.ALLOWLIST) {
                 list.removeIf(w -> w.equalsIgnoreCase(world));
             } else {
                 if (list.stream().noneMatch(w -> w.equalsIgnoreCase(world))) {
@@ -114,30 +115,48 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter {
         PluginConfig cfg = plugin.getPluginConfig();
         StructureIsolationListener listener = plugin.getIsolationListener();
         MultiverseHook hook = listener.getMultiverseHook();
+        IsolationPolicy policy = cfg.getIsolationPolicy();
 
         sender.sendMessage(Component.text("--- Embedize ---", NamedTextColor.GOLD));
-        sender.sendMessage(Component.text("enabled: " + cfg.isEnabled() + "  mode: " + cfg.getMode(), NamedTextColor.GRAY));
-        sender.sendMessage(Component.text("namespaces: " + cfg.getManagedNamespaces(), NamedTextColor.GRAY));
-        sender.sendMessage(Component.text("configured worlds: " + cfg.getConfiguredWorlds(), NamedTextColor.GRAY));
-        sender.sendMessage(Component.text("allowed spawns: " + listener.getAllowedCount()
-                + "  cancelled: " + listener.getCancelledCount(), NamedTextColor.GRAY));
+        sender.sendMessage(Component.text("enabled: " + cfg.isEnabled()
+                + "  strict: " + cfg.isStrictIsolation()
+                + "  mode: " + cfg.getMode(), NamedTextColor.GRAY));
+        sender.sendMessage(Component.text("filter: " + cfg.getFilterMode()
+                + "  namespaces: " + cfg.getManagedNamespaces(), NamedTextColor.GRAY));
+        sender.sendMessage(Component.text("allowed-worlds: " + cfg.getConfiguredWorlds(), NamedTextColor.GRAY));
+        sender.sendMessage(Component.text("sealed-worlds: " + cfg.getSealedWorlds(), NamedTextColor.GRAY));
+        sender.sendMessage(Component.text("allowed: " + listener.getAllowedCount()
+                + "  denied: " + listener.getCancelledCount()
+                + "  passed(unmanaged): " + listener.getPassedCount(), NamedTextColor.GRAY));
         sender.sendMessage(Component.text("Multiverse-Core: " + (hook.isPresent() ? "yes" : "no")
                 + "  TerraformGenerator: " + (hook.isTerraformGeneratorPresent() ? "yes" : "no"), NamedTextColor.GRAY));
+        if (policy != null) {
+            sender.sendMessage(Component.text("policy worlds allow=" + policy.getAllowedWorlds()
+                    + " sealed=" + policy.getSealedWorlds(), NamedTextColor.DARK_GRAY));
+        }
         sender.sendMessage(Component.text(plugin.getDatapackService().statusSummary(), NamedTextColor.DARK_AQUA));
     }
 
     private void sendWorlds(CommandSender sender) {
         PluginConfig cfg = plugin.getPluginConfig();
         MultiverseHook hook = plugin.getIsolationListener().getMultiverseHook();
-        sender.sendMessage(Component.text("Loaded worlds vs isolation:", NamedTextColor.GOLD));
+        IsolationPolicy policy = cfg.getIsolationPolicy();
+        sender.sendMessage(Component.text("Loaded worlds vs isolation (managed structures):", NamedTextColor.GOLD));
         for (World world : Bukkit.getWorlds()) {
-            boolean listed = hook.matchesConfiguredWorld(
-                    world.getName(), cfg.getConfiguredWorlds(), cfg.isResolveAliases());
-            boolean willGenerate = cfg.getMode() == PluginConfig.Mode.ALLOWLIST ? listed : !listed;
+            boolean sealed = policy.isSealedWorld(world.getName())
+                    || (cfg.isResolveAliases() && hook.matchesConfiguredWorld(
+                    world.getName(), policy.getSealedWorlds(), true));
+            boolean listed = policy.isAllowedWorldListed(world.getName())
+                    || (cfg.isResolveAliases() && hook.matchesConfiguredWorld(
+                    world.getName(), policy.getAllowedWorlds(), true));
+            IsolationPolicy.Decision sample = policy.decideWithFlags(
+                    "nova_structures", "sample", sealed, listed);
+            boolean willGenerate = sample == IsolationPolicy.Decision.ALLOW;
             String gen = world.getGenerator() == null ? "vanilla" : world.getGenerator().getClass().getSimpleName();
             sender.sendMessage(Component.text(
                     " - " + world.getName() + " [" + world.getEnvironment() + "] gen=" + gen
-                            + " → managed structures: " + (willGenerate ? "YES" : "no"),
+                            + " sealed=" + sealed + " listed=" + listed
+                            + " → " + (willGenerate ? "YES" : "NO"),
                     willGenerate ? NamedTextColor.GREEN : NamedTextColor.DARK_GRAY
             ));
         }
