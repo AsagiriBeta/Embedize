@@ -1,5 +1,7 @@
 package com.embedize;
 
+import com.embedize.border.BorderListener;
+import com.embedize.border.BorderManager;
 import com.embedize.command.EmbedizeCommand;
 import com.embedize.compat.LuckPermsHook;
 import com.embedize.config.PluginConfig;
@@ -13,6 +15,7 @@ public final class EmbedizePlugin extends JavaPlugin {
 
     private PluginConfig pluginConfig;
     private GroupManager groupManager;
+    private BorderManager borderManager;
     private DatapackService datapackService;
     private StructureIsolationListener isolationListener;
     private LuckPermsHook luckPermsHook;
@@ -31,9 +34,13 @@ public final class EmbedizePlugin extends JavaPlugin {
         this.groupManager.load();
         this.pluginConfig.reload();
 
+        this.borderManager = new BorderManager(this);
+        this.borderManager.load();
+
         this.datapackService = new DatapackService(this, pluginConfig);
         this.isolationListener = new StructureIsolationListener(this, pluginConfig);
         getServer().getPluginManager().registerEvents(isolationListener, this);
+        getServer().getPluginManager().registerEvents(new BorderListener(this), this);
 
         EmbedizeCommand command = new EmbedizeCommand(this);
         var pluginCommand = getCommand("embedize");
@@ -42,7 +49,6 @@ public final class EmbedizePlugin extends JavaPlugin {
             pluginCommand.setTabCompleter(command);
         }
 
-        // Optional TFG biome bridge only (not structure pack downloads)
         SchedulerUtil.runAsync(this, () -> {
             try {
                 datapackService.ensureInstalled();
@@ -52,11 +58,16 @@ public final class EmbedizePlugin extends JavaPlugin {
             }
         });
 
-        getLogger().info("Embedize enabled. groups=" + groupManager.ids());
+        getLogger().info("Embedize enabled. groups=" + groupManager.ids()
+                + " borders=" + borderManager.worldNames());
     }
 
     @Override
     public void onDisable() {
+        if (borderManager != null) {
+            borderManager.shutdown();
+            borderManager.save();
+        }
         if (groupManager != null) {
             groupManager.save();
         }
@@ -69,6 +80,10 @@ public final class EmbedizePlugin extends JavaPlugin {
 
     public GroupManager getGroupManager() {
         return groupManager;
+    }
+
+    public BorderManager getBorderManager() {
+        return borderManager;
     }
 
     public DatapackService getDatapackService() {
@@ -87,6 +102,8 @@ public final class EmbedizePlugin extends JavaPlugin {
         reloadConfig();
         groupManager.load();
         pluginConfig.reload();
-        getLogger().info("Configuration reloaded. groups=" + groupManager.ids());
+        borderManager.load();
+        getLogger().info("Configuration reloaded. groups=" + groupManager.ids()
+                + " borders=" + borderManager.worldNames());
     }
 }

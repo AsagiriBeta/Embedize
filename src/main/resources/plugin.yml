@@ -4,12 +4,12 @@ main: com.embedize.EmbedizePlugin
 api-version: '1.21'
 folia-supported: true
 authors: [Embedize]
-description: Isolate structure datapacks into groups with per-group world whitelists.
+description: Isolate structure datapacks and enforce invisible per-world borders.
 softdepend: [Multiverse-Core, TerraformGenerator, LuckPerms]
 commands:
   embedize:
     description: Embedize admin commands
-    usage: /embedize <reload|status|worlds|group>
+    usage: /embedize <reload|status|worlds|group|border>
     permission: embedize.admin
     aliases: [emb, ez]
 permissions:
@@ -18,11 +18,18 @@ permissions:
     default: op
     children:
       embedize.group.admin: true
+      embedize.border.admin: true
       embedize.command.reload: true
       embedize.command.status: true
   embedize.group.admin:
     description: Manage all structure groups
     default: op
+  embedize.border.admin:
+    description: Manage invisible world borders
+    default: op
+  embedize.border.bypass:
+    description: Bypass invisible world borders
+    default: false
   embedize.command.reload:
     description: Reload Embedize
     default: op

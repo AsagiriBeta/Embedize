@@ -1,6 +1,8 @@
 package com.embedize.command;
 
 import com.embedize.EmbedizePlugin;
+import com.embedize.border.BorderManager;
+import com.embedize.border.WorldBorderData;
 import com.embedize.compat.LuckPermsHook;
 import com.embedize.compat.MultiverseHook;
 import com.embedize.config.PluginConfig;
@@ -10,11 +12,13 @@ import com.embedize.structure.StructureIsolationListener;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandExecutor;
 import org.bukkit.command.CommandSender;
 import org.bukkit.command.TabCompleter;
+import org.bukkit.entity.Player;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
@@ -22,6 +26,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -64,11 +69,202 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter {
                 }
                 sendWorldsOverview(sender);
             }
+            case "border" -> handleBorder(sender, label, args);
             case "group" -> handleGroup(sender, label, args);
             case "help" -> sendHelp(sender, label);
             default -> sendHelp(sender, label);
         }
         return true;
+    }
+
+    /**
+     * /embedize border list
+     * /embedize border &lt;world&gt; info|clear|set|shape ...
+     */
+    private void handleBorder(CommandSender sender, String label, String[] args) {
+        LuckPermsHook lp = plugin.getLuckPermsHook();
+        if (!lp.hasAdmin(sender) && !sender.hasPermission("embedize.border.admin")) {
+            deny(sender);
+            return;
+        }
+        BorderManager bm = plugin.getBorderManager();
+        if (args.length < 2) {
+            sendBorderHelp(sender, label);
+            return;
+        }
+        String second = args[1].toLowerCase(Locale.ROOT);
+        if (second.equals("list")) {
+            sender.sendMessage(Component.text("Borders (by world name):", NamedTextColor.GOLD));
+            Map<String, WorldBorderData> all = bm.all();
+            if (all.isEmpty()) {
+                sender.sendMessage(Component.text(" (none)", NamedTextColor.DARK_GRAY));
+                return;
+            }
+            for (Map.Entry<String, WorldBorderData> e : all.entrySet()) {
+                boolean loaded = Bukkit.getWorld(e.getKey()) != null;
+                sender.sendMessage(Component.text(
+                        " - " + e.getKey() + " → " + e.getValue()
+                                + (loaded ? "" : " [world not loaded]"),
+                        NamedTextColor.GRAY));
+            }
+            return;
+        }
+
+        String worldName = args[1];
+        if (args.length < 3) {
+            sender.sendMessage(Component.text(
+                    "Usage: /" + label + " border " + worldName + " <info|clear|set|shape>",
+                    NamedTextColor.YELLOW));
+            return;
+        }
+        String action = args[2].toLowerCase(Locale.ROOT);
+        switch (action) {
+            case "info" -> {
+                Optional<WorldBorderData> opt = bm.getBorder(worldName);
+                if (opt.isEmpty()) {
+                    sender.sendMessage(Component.text("No border for '" + worldName + "'.", NamedTextColor.RED));
+                    return;
+                }
+                WorldBorderData b = opt.get();
+                sender.sendMessage(Component.text("--- Border " + worldName + " ---", NamedTextColor.GOLD));
+                sender.sendMessage(Component.text(b.toString(), NamedTextColor.GRAY));
+                sender.sendMessage(Component.text("global shape: " + bm.getDefaultShape().name().toLowerCase(Locale.ROOT)
+                        + "  knockback: " + bm.getKnockback(), NamedTextColor.DARK_AQUA));
+                if (Bukkit.getWorld(worldName) == null) {
+                    sender.sendMessage(Component.text(
+                            "World not loaded — border still saved and will apply when recreated.",
+                            NamedTextColor.YELLOW));
+                }
+            }
+            case "clear" -> {
+                if (bm.clearBorder(worldName)) {
+                    sender.sendMessage(Component.text("Cleared border for '" + worldName + "'.", NamedTextColor.GREEN));
+                } else {
+                    sender.sendMessage(Component.text("No border for '" + worldName + "'.", NamedTextColor.RED));
+                }
+            }
+            case "shape" -> {
+                if (args.length < 4) {
+                    sender.sendMessage(Component.text(
+                            "Usage: /" + label + " border " + worldName + " shape <square|round>",
+                            NamedTextColor.RED));
+                    return;
+                }
+                WorldBorderData.Shape shape = WorldBorderData.Shape.parse(args[3], null);
+                if (shape == null) {
+                    sender.sendMessage(Component.text("Shape must be square or round.", NamedTextColor.RED));
+                    return;
+                }
+                Optional<WorldBorderData> opt = bm.getBorder(worldName);
+                if (opt.isEmpty()) {
+                    sender.sendMessage(Component.text("Set a border first.", NamedTextColor.RED));
+                    return;
+                }
+                WorldBorderData b = opt.get();
+                b.setShapeOverride(shape);
+                bm.setBorder(worldName, b);
+                sender.sendMessage(Component.text(worldName + " shape → " + shape.name().toLowerCase(Locale.ROOT), NamedTextColor.GREEN));
+            }
+            case "set" -> handleBorderSet(sender, label, worldName, args);
+            default -> sendBorderHelp(sender, label);
+        }
+    }
+
+    /**
+     * set &lt;radius&gt;
+     * set &lt;radius&gt; spawn
+     * set &lt;radius&gt; &lt;x&gt; &lt;z&gt;
+     * set &lt;radiusX&gt; &lt;radiusZ&gt; &lt;x&gt; &lt;z&gt;
+     */
+    private void handleBorderSet(CommandSender sender, String label, String worldName, String[] args) {
+        // args: border <world> set ...
+        if (args.length < 4) {
+            sender.sendMessage(Component.text(
+                    "Usage: /" + label + " border " + worldName + " set <radius> [x z|spawn]",
+                    NamedTextColor.RED));
+            return;
+        }
+        BorderManager bm = plugin.getBorderManager();
+        try {
+            int radiusX;
+            int radiusZ;
+            double x;
+            double z;
+
+            if (args.length == 4) {
+                // set <radius> — center on player or world spawn / 0,0
+                radiusX = Integer.parseInt(args[3]);
+                radiusZ = radiusX;
+                World world = Bukkit.getWorld(worldName);
+                if (sender instanceof Player player && player.getWorld().getName().equalsIgnoreCase(worldName)) {
+                    x = player.getLocation().getX();
+                    z = player.getLocation().getZ();
+                } else if (world != null) {
+                    Location spawn = world.getSpawnLocation();
+                    x = spawn.getX();
+                    z = spawn.getZ();
+                } else {
+                    x = 0.5;
+                    z = 0.5;
+                    sender.sendMessage(Component.text(
+                            "World '" + worldName + "' not loaded; centering at 0.5,0.5 (border still saved).",
+                            NamedTextColor.YELLOW));
+                }
+            } else if (args.length == 5 && args[4].equalsIgnoreCase("spawn")) {
+                radiusX = Integer.parseInt(args[3]);
+                radiusZ = radiusX;
+                World world = Bukkit.getWorld(worldName);
+                if (world == null) {
+                    sender.sendMessage(Component.text(
+                            "World '" + worldName + "' not loaded; cannot use spawn. Pass x z instead.",
+                            NamedTextColor.RED));
+                    return;
+                }
+                Location spawn = world.getSpawnLocation();
+                x = spawn.getX();
+                z = spawn.getZ();
+            } else if (args.length == 6) {
+                radiusX = Integer.parseInt(args[3]);
+                radiusZ = radiusX;
+                x = Double.parseDouble(args[4]);
+                z = Double.parseDouble(args[5]);
+            } else if (args.length >= 7) {
+                radiusX = Integer.parseInt(args[3]);
+                radiusZ = Integer.parseInt(args[4]);
+                x = Double.parseDouble(args[5]);
+                z = Double.parseDouble(args[6]);
+            } else {
+                sender.sendMessage(Component.text(
+                        "Usage: /" + label + " border " + worldName + " set <radius> [x z|spawn]",
+                        NamedTextColor.RED));
+                return;
+            }
+
+            if (radiusX <= 0 || radiusZ <= 0) {
+                sender.sendMessage(Component.text("Radius must be positive.", NamedTextColor.RED));
+                return;
+            }
+
+            Optional<WorldBorderData> existing = bm.getBorder(worldName);
+            WorldBorderData.Shape override = existing.map(WorldBorderData::getShapeOverride).orElse(null);
+            WorldBorderData border = new WorldBorderData(x, z, radiusX, radiusZ, override);
+            bm.setBorder(worldName, border);
+            boolean loaded = Bukkit.getWorld(worldName) != null;
+            sender.sendMessage(Component.text(
+                    "Border set for '" + worldName + "': " + border
+                            + (loaded ? "" : " (world not loaded — will apply on create/load)"),
+                    NamedTextColor.GREEN));
+        } catch (NumberFormatException ex) {
+            sender.sendMessage(Component.text("Invalid number.", NamedTextColor.RED));
+        }
+    }
+
+    private void sendBorderHelp(CommandSender sender, String label) {
+        sender.sendMessage(Component.text("/" + label + " border list", NamedTextColor.DARK_GRAY));
+        sender.sendMessage(Component.text("/" + label + " border <world> info|clear", NamedTextColor.DARK_GRAY));
+        sender.sendMessage(Component.text("/" + label + " border <world> set <radius> [x z|spawn]", NamedTextColor.DARK_GRAY));
+        sender.sendMessage(Component.text("/" + label + " border <world> set <rx> <rz> <x> <z>", NamedTextColor.DARK_GRAY));
+        sender.sendMessage(Component.text("/" + label + " border <world> shape square|round", NamedTextColor.DARK_GRAY));
     }
 
     /**
@@ -284,6 +480,8 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(Component.text("enabled: " + cfg.isEnabled()
                 + "  manage-ungrouped: " + cfg.isManageUngrouped(), NamedTextColor.GRAY));
         sender.sendMessage(Component.text("groups: " + plugin.getGroupManager().ids(), NamedTextColor.GRAY));
+        sender.sendMessage(Component.text("borders: " + plugin.getBorderManager().worldNames()
+                + "  knockback: " + plugin.getBorderManager().getKnockback(), NamedTextColor.GRAY));
         sender.sendMessage(Component.text("allowed: " + listener.getAllowedCount()
                 + "  denied: " + listener.getCancelledCount()
                 + "  passed: " + listener.getPassedCount(), NamedTextColor.GRAY));
@@ -316,8 +514,9 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter {
     }
 
     private void sendHelp(CommandSender sender, String label) {
-        sender.sendMessage(Component.text("/" + label + " reload|status|worlds|group ...", NamedTextColor.YELLOW));
+        sender.sendMessage(Component.text("/" + label + " reload|status|worlds|group|border ...", NamedTextColor.YELLOW));
         sendGroupHelp(sender, label);
+        sendBorderHelp(sender, label);
     }
 
     private void sendGroupHelp(CommandSender sender, String label) {
@@ -334,7 +533,10 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter {
     @Override
     public @Nullable List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String alias, @NotNull String[] args) {
         if (args.length == 1) {
-            return filter(args[0], Arrays.asList("reload", "status", "worlds", "group", "help"));
+            return filter(args[0], Arrays.asList("reload", "status", "worlds", "group", "border", "help"));
+        }
+        if (args[0].equalsIgnoreCase("border")) {
+            return tabBorder(args);
         }
         if (!args[0].equalsIgnoreCase("group")) {
             return List.of();
@@ -372,6 +574,26 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter {
                     }
                 }
             }
+        }
+        return List.of();
+    }
+
+    private List<String> tabBorder(String[] args) {
+        List<String> worldNames = new ArrayList<>();
+        worldNames.add("list");
+        Bukkit.getWorlds().forEach(w -> worldNames.add(w.getName()));
+        worldNames.addAll(plugin.getBorderManager().worldNames());
+        if (args.length == 2) {
+            return filter(args[1], worldNames.stream().distinct().toList());
+        }
+        if (args.length == 3 && !args[1].equalsIgnoreCase("list")) {
+            return filter(args[2], Arrays.asList("info", "clear", "set", "shape"));
+        }
+        if (args.length == 4 && args[2].equalsIgnoreCase("shape")) {
+            return filter(args[3], Arrays.asList("square", "round"));
+        }
+        if (args.length == 5 && args[2].equalsIgnoreCase("set")) {
+            return filter(args[4], Arrays.asList("spawn"));
         }
         return List.of();
     }

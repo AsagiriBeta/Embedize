@@ -38,4 +38,19 @@ public final class SchedulerUtil {
     public static void runAsyncLater(Plugin plugin, Runnable task, long delayMs) {
         Bukkit.getAsyncScheduler().runDelayed(plugin, scheduled -> task.run(), Math.max(1L, delayMs), TimeUnit.MILLISECONDS);
     }
+
+    public static void runForEntity(Plugin plugin, org.bukkit.entity.Entity entity, Runnable task) {
+        entity.getScheduler().run(plugin, scheduled -> task.run(), null);
+    }
+
+    public static io.papermc.paper.threadedregions.scheduler.ScheduledTask runGlobalTimer(
+            Plugin plugin,
+            Runnable task,
+            long initialDelayTicks,
+            long periodTicks
+    ) {
+        long delay = Math.max(1L, initialDelayTicks);
+        long period = Math.max(1L, periodTicks);
+        return Bukkit.getGlobalRegionScheduler().runAtFixedRate(plugin, scheduled -> task.run(), delay, period);
+    }
 }
