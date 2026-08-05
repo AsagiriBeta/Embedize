@@ -11,8 +11,8 @@ Paper / Folia：按分组隔离结构数据包自然生成。原版 `minecraft:`
 /embedize group <id> info
 /embedize group <id> add <pack>
 /embedize group <id> remove <pack>
-/embedize group <id> allow <world>
-/embedize group <id> deny <world>
+/embedize group <id> allowlist add <world>
+/embedize group <id> allowlist remove <world>
 ```
 
 示例：
@@ -20,7 +20,7 @@ Paper / Folia：按分组隔离结构数据包自然生成。原版 `minecraft:`
 ```
 /embedize group create dungeons
 /embedize group dungeons add dungeons-and-taverns
-/embedize group dungeons allow resource
+/embedize group dungeons allowlist add resource
 ```
 
 `pack` 优先匹配 `config.yml` 里 `datapacks.sources` 的 id（并带上其 `namespaces`）；未知 id 会当作结构命名空间处理。

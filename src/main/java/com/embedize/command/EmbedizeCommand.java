@@ -82,7 +82,7 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter {
     /**
      * Syntax:
      *   /embedize group list|create|delete ...
-     *   /embedize group <id> info|add|remove|allow|deny ...
+     *   /embedize group <id> info|add|remove|allowlist ...
      */
     private void handleGroup(CommandSender sender, String label, String[] args) {
         LuckPermsHook lp = plugin.getLuckPermsHook();
@@ -145,7 +145,7 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter {
 
         if (args.length < 3) {
             sender.sendMessage(Component.text("Usage: /" + label + " group " + group.getId()
-                    + " <info|add|remove|allow|deny>", NamedTextColor.YELLOW));
+                    + " <info|add|remove|allowlist>", NamedTextColor.YELLOW));
             return;
         }
 
@@ -191,37 +191,51 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter {
                 handlePackResult(sender, result, group.getId(), pack, false);
                 plugin.getPluginConfig().rebuildIsolationPolicy();
             }
-            case "allow" -> {
-                if (!lp.canManageGroup(sender, group.getId())) {
-                    deny(sender);
-                    return;
-                }
-                if (args.length < 4) {
-                    sender.sendMessage(Component.text("Usage: /" + label + " group " + group.getId() + " allow <world>", NamedTextColor.RED));
-                    return;
-                }
-                group.addWorld(args[3]);
-                gm.save();
-                plugin.getPluginConfig().rebuildIsolationPolicy();
-                sender.sendMessage(Component.text(group.getId() + " allowed-worlds: " + group.getAllowedWorlds(), NamedTextColor.GREEN));
-            }
-            case "deny" -> {
-                if (!lp.canManageGroup(sender, group.getId())) {
-                    deny(sender);
-                    return;
-                }
-                if (args.length < 4) {
-                    sender.sendMessage(Component.text("Usage: /" + label + " group " + group.getId() + " deny <world>", NamedTextColor.RED));
-                    return;
-                }
-                group.removeWorld(args[3]);
-                gm.save();
-                plugin.getPluginConfig().rebuildIsolationPolicy();
-                sender.sendMessage(Component.text(group.getId() + " allowed-worlds: " + group.getAllowedWorlds(), NamedTextColor.GREEN));
-            }
+            case "allowlist" -> handleAllowlist(sender, label, lp, gm, group, args);
             default -> sender.sendMessage(Component.text("Usage: /" + label + " group " + group.getId()
-                    + " <info|add|remove|allow|deny>", NamedTextColor.YELLOW));
+                    + " <info|add|remove|allowlist>", NamedTextColor.YELLOW));
         }
+    }
+
+    private void handleAllowlist(
+            CommandSender sender,
+            String label,
+            LuckPermsHook lp,
+            GroupManager gm,
+            StructureGroup group,
+            String[] args
+    ) {
+        if (!lp.canManageGroup(sender, group.getId())) {
+            deny(sender);
+            return;
+        }
+        if (args.length < 5) {
+            sender.sendMessage(Component.text(
+                    "Usage: /" + label + " group " + group.getId() + " allowlist add|remove <world>",
+                    NamedTextColor.RED));
+            return;
+        }
+        String op = args[3].toLowerCase(Locale.ROOT);
+        String world = args[4];
+        boolean changed;
+        switch (op) {
+            case "add" -> changed = group.addWorld(world);
+            case "remove" -> changed = group.removeWorld(world);
+            default -> {
+                sender.sendMessage(Component.text(
+                        "Usage: /" + label + " group " + group.getId() + " allowlist add|remove <world>",
+                        NamedTextColor.RED));
+                return;
+            }
+        }
+        if (changed) {
+            gm.save();
+            plugin.getPluginConfig().rebuildIsolationPolicy();
+        }
+        sender.sendMessage(Component.text(
+                group.getId() + " allowlist " + (changed ? (op.equals("add") ? "added" : "removed") : "unchanged")
+                        + " '" + world + "': " + group.getAllowedWorlds(),
+                changed ? NamedTextColor.GREEN : NamedTextColor.YELLOW));
     }
 
     private void handlePackResult(CommandSender sender, String result, String groupId, String pack, boolean adding) {
@@ -339,7 +353,7 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(Component.text("/" + label + " group list|create <id>|delete <id>", NamedTextColor.DARK_GRAY));
         sender.sendMessage(Component.text("/" + label + " group <id> info", NamedTextColor.DARK_GRAY));
         sender.sendMessage(Component.text("/" + label + " group <id> add|remove <pack>", NamedTextColor.DARK_GRAY));
-        sender.sendMessage(Component.text("/" + label + " group <id> allow|deny <world>", NamedTextColor.DARK_GRAY));
+        sender.sendMessage(Component.text("/" + label + " group <id> allowlist add|remove <world>", NamedTextColor.DARK_GRAY));
     }
 
     private void deny(CommandSender sender) {
@@ -374,14 +388,22 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter {
         // group <id> ...
         if (plugin.getGroupManager().get(args[1]).isPresent()) {
             if (args.length == 3) {
-                return filter(args[2], Arrays.asList("info", "add", "remove", "allow", "deny"));
+                return filter(args[2], Arrays.asList("info", "add", "remove", "allowlist"));
             }
             String action = args[2].toLowerCase(Locale.ROOT);
             if (args.length == 4 && (action.equals("add") || action.equals("remove"))) {
                 return filter(args[3], packIds);
             }
-            if (args.length == 4 && (action.equals("allow") || action.equals("deny"))) {
-                return filter(args[3], Bukkit.getWorlds().stream().map(World::getName).collect(Collectors.toList()));
+            if (action.equals("allowlist")) {
+                if (args.length == 4) {
+                    return filter(args[3], Arrays.asList("add", "remove"));
+                }
+                if (args.length == 5) {
+                    String op = args[3].toLowerCase(Locale.ROOT);
+                    if (op.equals("add") || op.equals("remove")) {
+                        return filter(args[4], Bukkit.getWorlds().stream().map(World::getName).collect(Collectors.toList()));
+                    }
+                }
             }
         }
         return List.of();
