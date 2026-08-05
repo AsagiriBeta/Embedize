@@ -1,8 +1,8 @@
-package com.dsi.isolator.structure;
+package com.embedize.structure;
 
-import com.dsi.isolator.DimensionStructureIsolatorPlugin;
-import com.dsi.isolator.compat.MultiverseHook;
-import com.dsi.isolator.config.PluginConfig;
+import com.embedize.EmbedizePlugin;
+import com.embedize.compat.MultiverseHook;
+import com.embedize.config.PluginConfig;
 import io.papermc.paper.registry.RegistryAccess;
 import io.papermc.paper.registry.RegistryKey;
 import org.bukkit.NamespacedKey;
@@ -22,13 +22,13 @@ import java.util.concurrent.atomic.AtomicLong;
  */
 public final class StructureIsolationListener implements Listener {
 
-    private final DimensionStructureIsolatorPlugin plugin;
+    private final EmbedizePlugin plugin;
     private final PluginConfig config;
     private final MultiverseHook multiverseHook;
     private final AtomicLong cancelled = new AtomicLong();
     private final AtomicLong allowed = new AtomicLong();
 
-    public StructureIsolationListener(DimensionStructureIsolatorPlugin plugin, PluginConfig config) {
+    public StructureIsolationListener(EmbedizePlugin plugin, PluginConfig config) {
         this.plugin = plugin;
         this.config = config;
         this.multiverseHook = new MultiverseHook(plugin.getLogger());

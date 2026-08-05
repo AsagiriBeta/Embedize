@@ -1,8 +1,8 @@
-package com.dsi.isolator.datapack;
+package com.embedize.datapack;
 
-import com.dsi.isolator.DimensionStructureIsolatorPlugin;
-import com.dsi.isolator.config.PluginConfig;
-import com.dsi.isolator.util.SchedulerUtil;
+import com.embedize.EmbedizePlugin;
+import com.embedize.config.PluginConfig;
+import com.embedize.util.SchedulerUtil;
 import org.bukkit.Bukkit;
 import org.bukkit.World;
 
@@ -25,15 +25,15 @@ import java.util.stream.Stream;
 
 public final class DatapackService {
 
-    public static final String TFG_BRIDGE_FOLDER = "dsi-tfg-biome-bridge";
-    public static final String DNT_FOLDER = "dsi-dungeons-and-taverns";
+    public static final String TFG_BRIDGE_FOLDER = "embedize-tfg-biome-bridge";
+    public static final String DNT_FOLDER = "embedize-dungeons-and-taverns";
 
-    private final DimensionStructureIsolatorPlugin plugin;
+    private final EmbedizePlugin plugin;
     private final PluginConfig config;
     private final DntDownloader dntDownloader;
     private final AtomicBoolean restartHintPrinted = new AtomicBoolean(false);
 
-    public DatapackService(DimensionStructureIsolatorPlugin plugin, PluginConfig config) {
+    public DatapackService(EmbedizePlugin plugin, PluginConfig config) {
         this.plugin = plugin;
         this.config = config;
         this.dntDownloader = new DntDownloader(plugin, config);
@@ -93,7 +93,7 @@ public final class DatapackService {
 
     private boolean installTfgBridge(Path datapacksDir) throws IOException {
         Path target = datapacksDir.resolve(TFG_BRIDGE_FOLDER);
-        Path marker = target.resolve(".dsi-installed");
+        Path marker = target.resolve(".embedize-installed");
         String resourceRoot = "datapacks/tfg-biome-bridge/";
 
         String pluginVersion = plugin.getDescription().getVersion();
@@ -116,7 +116,7 @@ public final class DatapackService {
 
     private boolean installDnt(Path datapacksDir) throws IOException, InterruptedException {
         Path target = datapacksDir.resolve(DNT_FOLDER);
-        Path marker = target.resolve(".dsi-dnt-source");
+        Path marker = target.resolve(".embedize-dnt-source");
 
         Path sourceZip = dntDownloader.ensureCached();
         String sourceKey = sourceZip.getFileName().toString() + ":" + Files.size(sourceZip);

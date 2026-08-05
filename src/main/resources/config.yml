@@ -1,4 +1,4 @@
-# DimensionStructureIsolator
+# Embedize
 # Isolates datapack structure generation to configured worlds (Multiverse dimensions).
 
 # Master switch
@@ -19,10 +19,6 @@ allowed-worlds:
 managed-namespaces:
   - nova_structures
 
-# If true, also isolate structures whose key contains any of these prefixes
-# (useful for addon packs that share naming conventions).
-# managed-key-prefixes: []
-
 # When a structure is cancelled in a non-allowed world, log at DEBUG (very spammy if true).
 debug-cancellations: false
 
@@ -33,7 +29,7 @@ datapacks:
   install-tfg-bridge: true
 
   # Dungeons and Taverns (ARR third-party). Not redistributed in git;
-  # downloaded from Modrinth and cached under plugins/DimensionStructureIsolator/cache/.
+  # downloaded from Modrinth and cached under plugins/Embedize/cache/.
   dungeons-and-taverns:
     enabled: true
     # auto | skip

@@ -1,1 +1,1 @@
-rootProject.name = "DimensionStructureIsolator"
+rootProject.name = "Embedize"

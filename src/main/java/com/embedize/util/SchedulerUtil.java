@@ -1,4 +1,4 @@
-package com.dsi.isolator.util;
+package com.embedize.util;
 
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;

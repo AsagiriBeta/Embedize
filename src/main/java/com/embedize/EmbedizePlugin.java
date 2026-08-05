@@ -1,13 +1,13 @@
-package com.dsi.isolator;
+package com.embedize;
 
-import com.dsi.isolator.command.DsiCommand;
-import com.dsi.isolator.config.PluginConfig;
-import com.dsi.isolator.datapack.DatapackService;
-import com.dsi.isolator.structure.StructureIsolationListener;
-import com.dsi.isolator.util.SchedulerUtil;
+import com.embedize.command.EmbedizeCommand;
+import com.embedize.config.PluginConfig;
+import com.embedize.datapack.DatapackService;
+import com.embedize.structure.StructureIsolationListener;
+import com.embedize.util.SchedulerUtil;
 import org.bukkit.plugin.java.JavaPlugin;
 
-public final class DimensionStructureIsolatorPlugin extends JavaPlugin {
+public final class EmbedizePlugin extends JavaPlugin {
 
     private PluginConfig pluginConfig;
     private DatapackService datapackService;
@@ -24,8 +24,8 @@ public final class DimensionStructureIsolatorPlugin extends JavaPlugin {
 
         getServer().getPluginManager().registerEvents(isolationListener, this);
 
-        DsiCommand command = new DsiCommand(this);
-        var pluginCommand = getCommand("dsi");
+        EmbedizeCommand command = new EmbedizeCommand(this);
+        var pluginCommand = getCommand("embedize");
         if (pluginCommand != null) {
             pluginCommand.setExecutor(command);
             pluginCommand.setTabCompleter(command);
@@ -41,13 +41,13 @@ public final class DimensionStructureIsolatorPlugin extends JavaPlugin {
             }
         });
 
-        getLogger().info("DimensionStructureIsolator enabled. Mode=" + pluginConfig.getMode()
+        getLogger().info("Embedize enabled. Mode=" + pluginConfig.getMode()
                 + " worlds=" + pluginConfig.getConfiguredWorlds());
     }
 
     @Override
     public void onDisable() {
-        getLogger().info("DimensionStructureIsolator disabled.");
+        getLogger().info("Embedize disabled.");
     }
 
     public PluginConfig getPluginConfig() {

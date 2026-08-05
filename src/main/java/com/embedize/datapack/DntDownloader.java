@@ -1,7 +1,7 @@
-package com.dsi.isolator.datapack;
+package com.embedize.datapack;
 
-import com.dsi.isolator.DimensionStructureIsolatorPlugin;
-import com.dsi.isolator.config.PluginConfig;
+import com.embedize.EmbedizePlugin;
+import com.embedize.config.PluginConfig;
 import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
@@ -27,13 +27,13 @@ import java.util.Optional;
  */
 public final class DntDownloader {
 
-    private static final String USER_AGENT = "DimensionStructureIsolator/1.0 (Paper plugin; +https://modrinth.com/datapack/dungeons-and-taverns)";
+    private static final String USER_AGENT = "Embedize/1.0 (Paper plugin; +https://modrinth.com/datapack/dungeons-and-taverns)";
 
-    private final DimensionStructureIsolatorPlugin plugin;
+    private final EmbedizePlugin plugin;
     private final PluginConfig config;
     private final HttpClient httpClient;
 
-    public DntDownloader(DimensionStructureIsolatorPlugin plugin, PluginConfig config) {
+    public DntDownloader(EmbedizePlugin plugin, PluginConfig config) {
         this.plugin = plugin;
         this.config = config;
         this.httpClient = HttpClient.newBuilder()

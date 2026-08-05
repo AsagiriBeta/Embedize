@@ -1,10 +1,10 @@
-package com.dsi.isolator.command;
+package com.embedize.command;
 
-import com.dsi.isolator.DimensionStructureIsolatorPlugin;
-import com.dsi.isolator.compat.MultiverseHook;
-import com.dsi.isolator.config.PluginConfig;
-import com.dsi.isolator.structure.StructureIsolationListener;
-import com.dsi.isolator.util.SchedulerUtil;
+import com.embedize.EmbedizePlugin;
+import com.embedize.compat.MultiverseHook;
+import com.embedize.config.PluginConfig;
+import com.embedize.structure.StructureIsolationListener;
+import com.embedize.util.SchedulerUtil;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
@@ -22,17 +22,17 @@ import java.util.List;
 import java.util.Locale;
 import java.util.stream.Collectors;
 
-public final class DsiCommand implements CommandExecutor, TabCompleter {
+public final class EmbedizeCommand implements CommandExecutor, TabCompleter {
 
-    private final DimensionStructureIsolatorPlugin plugin;
+    private final EmbedizePlugin plugin;
 
-    public DsiCommand(DimensionStructureIsolatorPlugin plugin) {
+    public EmbedizeCommand(EmbedizePlugin plugin) {
         this.plugin = plugin;
     }
 
     @Override
     public boolean onCommand(@NotNull CommandSender sender, @NotNull Command command, @NotNull String label, @NotNull String[] args) {
-        if (!sender.hasPermission("dsi.admin")) {
+        if (!sender.hasPermission("embedize.admin")) {
             sender.sendMessage(Component.text("No permission.", NamedTextColor.RED));
             return true;
         }
@@ -45,7 +45,7 @@ public final class DsiCommand implements CommandExecutor, TabCompleter {
         switch (sub) {
             case "reload" -> {
                 plugin.reloadPlugin();
-                sender.sendMessage(Component.text("DSI config reloaded.", NamedTextColor.GREEN));
+                sender.sendMessage(Component.text("Embedize config reloaded.", NamedTextColor.GREEN));
             }
             case "status" -> sendStatus(sender);
             case "worlds" -> sendWorlds(sender);
@@ -78,7 +78,7 @@ public final class DsiCommand implements CommandExecutor, TabCompleter {
 
     private void mutateWorldList(CommandSender sender, String[] args, boolean allowSubcommand) {
         if (args.length < 2) {
-            sender.sendMessage(Component.text("Usage: /dsi " + (allowSubcommand ? "allow" : "deny") + " <world>", NamedTextColor.RED));
+            sender.sendMessage(Component.text("Usage: /embedize " + (allowSubcommand ? "allow" : "deny") + " <world>", NamedTextColor.RED));
             return;
         }
         String world = args[1];
@@ -115,7 +115,7 @@ public final class DsiCommand implements CommandExecutor, TabCompleter {
         StructureIsolationListener listener = plugin.getIsolationListener();
         MultiverseHook hook = listener.getMultiverseHook();
 
-        sender.sendMessage(Component.text("--- DimensionStructureIsolator ---", NamedTextColor.GOLD));
+        sender.sendMessage(Component.text("--- Embedize ---", NamedTextColor.GOLD));
         sender.sendMessage(Component.text("enabled: " + cfg.isEnabled() + "  mode: " + cfg.getMode(), NamedTextColor.GRAY));
         sender.sendMessage(Component.text("namespaces: " + cfg.getManagedNamespaces(), NamedTextColor.GRAY));
         sender.sendMessage(Component.text("configured worlds: " + cfg.getConfiguredWorlds(), NamedTextColor.GRAY));
@@ -149,7 +149,7 @@ public final class DsiCommand implements CommandExecutor, TabCompleter {
 
     @Override
     public @Nullable List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String alias, @NotNull String[] args) {
-        if (!sender.hasPermission("dsi.admin")) {
+        if (!sender.hasPermission("embedize.admin")) {
             return List.of();
         }
         if (args.length == 1) {

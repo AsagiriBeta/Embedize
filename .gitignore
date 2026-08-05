@@ -12,4 +12,4 @@ bin/
 run/
 *.log
 .DS_Store
-plugins/DimensionStructureIsolator/cache/
+plugins/Embedize/cache/

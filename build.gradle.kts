@@ -2,7 +2,7 @@ plugins {
     java
 }
 
-group = "com.dsi"
+group = "com.embedize"
 version = "1.0.0"
 
 java {
@@ -38,7 +38,7 @@ tasks.processResources {
 }
 
 tasks.jar {
-    archiveBaseName.set("DimensionStructureIsolator")
+    archiveBaseName.set("Embedize")
 }
 
 tasks.withType<JavaCompile> {

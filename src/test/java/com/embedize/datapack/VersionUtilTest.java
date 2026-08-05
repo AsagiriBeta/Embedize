@@ -1,4 +1,4 @@
-package com.dsi.isolator.datapack;
+package com.embedize.datapack;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;

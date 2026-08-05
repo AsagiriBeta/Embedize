@@ -1,4 +1,4 @@
-package com.dsi.isolator.datapack;
+package com.embedize.datapack;
 
 import java.util.Locale;
 

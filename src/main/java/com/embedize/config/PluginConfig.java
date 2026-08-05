@@ -1,6 +1,6 @@
-package com.dsi.isolator.config;
+package com.embedize.config;
 
-import com.dsi.isolator.DimensionStructureIsolatorPlugin;
+import com.embedize.EmbedizePlugin;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 
@@ -17,7 +17,7 @@ public final class PluginConfig {
         DENYLIST
     }
 
-    private final DimensionStructureIsolatorPlugin plugin;
+    private final EmbedizePlugin plugin;
 
     private boolean enabled;
     private Mode mode;
@@ -33,7 +33,7 @@ public final class PluginConfig {
     private String installDirectory;
     private boolean resolveAliases;
 
-    public PluginConfig(DimensionStructureIsolatorPlugin plugin) {
+    public PluginConfig(EmbedizePlugin plugin) {
         this.plugin = plugin;
     }
 

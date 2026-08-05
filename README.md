@@ -1,4 +1,4 @@
-# DimensionStructureIsolator
+# Embedize
 
 Paper / Folia 插件：把数据包结构的**全局生成**隔离到你指定的 Multiverse 世界（维度）里。
 
@@ -17,7 +17,7 @@ Paper / Folia 插件：把数据包结构的**全局生成**隔离到你指定�
 ## 快速开始
 
 1. 安装 Paper / Folia，放入本插件，建议同时安装 Multiverse-Core；探索世界可用 TerraformGenerator。
-2. 编辑 `plugins/DimensionStructureIsolator/config.yml`：
+2. 编辑 `plugins/Embedize/config.yml`：
 
 ```yaml
 mode: ALLOWLIST
@@ -34,22 +34,22 @@ managed-namespaces:
 ```
 
 4. 启动后插件会自动下载并安装 DnT；控制台提示后执行 `/minecraft:reload` 或重启。
-5. 用 `/dsi status`、`/dsi worlds` 检查隔离状态。
+5. 用 `/embedize status`、`/embedize worlds` 检查隔离状态。
 
-也可手动把 DnT zip 放到 `plugins/DimensionStructureIsolator/datapacks/`，插件会优先使用本地文件。
+也可手动把 DnT zip 放到 `plugins/Embedize/datapacks/`，插件会优先使用本地文件。
 
 ## 命令
 
 | 命令 | 说明 |
 |------|------|
-| `/dsi status` | 模式、命名空间、取消/放行计数、MV/TFG、数据包路径 |
-| `/dsi worlds` | 各已加载世界是否会生成托管结构 |
-| `/dsi reload` | 重载配置 |
-| `/dsi install` | 强制重新下载/安装 DnT 与 TFG 桥接包 |
-| `/dsi allow <world>` | 将世界加入“可生成”侧 |
-| `/dsi deny <world>` | 将世界移出“可生成”侧 |
+| `/embedize status` | 模式、命名空间、取消/放行计数、MV/TFG、数据包路径 |
+| `/embedize worlds` | 各已加载世界是否会生成托管结构 |
+| `/embedize reload` | 重载配置 |
+| `/embedize install` | 强制重新下载/安装 DnT 与 TFG 桥接包 |
+| `/embedize allow <world>` | 将世界加入“可生成”侧 |
+| `/embedize deny <world>` | 将世界移出“可生成”侧 |
 
-权限：`dsi.admin`（默认 OP）。
+权限：`embedize.admin`（默认 OP）。别名：`/emb`、`/ez`。
 
 ## 构建
 
@@ -57,7 +57,7 @@ managed-namespaces:
 ./gradlew jar
 ```
 
-产物：`build/libs/DimensionStructureIsolator-1.0.0.jar`
+产物：`build/libs/Embedize-1.0.0.jar`
 
 ## 许可说明
 

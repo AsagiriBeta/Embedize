@@ -1,4 +1,4 @@
-package com.dsi.isolator.compat;
+package com.embedize.compat;
 
 import org.bukkit.Bukkit;
 import org.bukkit.World;
