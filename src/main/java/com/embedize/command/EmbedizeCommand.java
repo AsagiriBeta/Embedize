@@ -111,6 +111,8 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter {
         }
 
         String worldName = args[1];
+        // Resolve Multiverse aliases to canonical world folder names for border persistence
+        worldName = plugin.getMultiverseHook().resolveWorldName(worldName).orElse(worldName);
         if (args.length < 3) {
             sender.sendMessage(Component.text(
                     "Usage: /" + label + " border " + worldName + " <info|clear|set|shape>",
@@ -476,6 +478,7 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter {
         PluginConfig cfg = plugin.getPluginConfig();
         StructureIsolationListener listener = plugin.getIsolationListener();
         LuckPermsHook lp = plugin.getLuckPermsHook();
+        MultiverseHook mv = plugin.getMultiverseHook();
         sender.sendMessage(Component.text("--- Embedize ---", NamedTextColor.GOLD));
         sender.sendMessage(Component.text("enabled: " + cfg.isEnabled()
                 + "  manage-ungrouped: " + cfg.isManageUngrouped(), NamedTextColor.GRAY));
@@ -485,16 +488,19 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(Component.text("allowed: " + listener.getAllowedCount()
                 + "  denied: " + listener.getCancelledCount()
                 + "  passed: " + listener.getPassedCount(), NamedTextColor.GRAY));
+        String mvLine = mv.isPresent()
+                ? "yes v" + mv.access().getVersion() + " worlds=" + mv.access().listManagedWorldNames().size()
+                : (Bukkit.getPluginManager().getPlugin("Multiverse-Core") != null ? "detected (binding…)" : "no");
         sender.sendMessage(Component.text("LuckPerms: " + (lp.isPresent() ? "yes" : "no")
-                + "  Multiverse: " + (listener.getMultiverseHook().isPresent() ? "yes" : "no")
-                + "  TFG: " + (listener.getMultiverseHook().isTerraformGeneratorPresent() ? "yes" : "no"),
+                + "  Multiverse: " + mvLine
+                + "  TFG: " + (mv.isTerraformGeneratorPresent() ? "yes (biome bridge only)" : "no"),
                 NamedTextColor.GRAY));
         sender.sendMessage(Component.text(plugin.getDatapackService().statusSummary(), NamedTextColor.DARK_AQUA));
     }
 
     private void sendWorldsOverview(CommandSender sender) {
         GroupManager gm = plugin.getGroupManager();
-        MultiverseHook hook = plugin.getIsolationListener().getMultiverseHook();
+        MultiverseHook hook = plugin.getMultiverseHook();
         boolean resolve = plugin.getPluginConfig().isResolveAliases();
         sender.sendMessage(Component.text("World × group matrix:", NamedTextColor.GOLD));
         for (World world : Bukkit.getWorlds()) {
@@ -506,10 +512,18 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter {
                     allowedGroups.add(g.getId());
                 }
             }
+            String alias = hook.access().getWorldAlias(world.getName()).map(a -> " alias=" + a).orElse("");
+            String border = plugin.getBorderManager().getBorder(world.getName()).isPresent() ? " [border]" : "";
             sender.sendMessage(Component.text(
-                    " - " + world.getName() + " → " + (allowedGroups.isEmpty() ? "(none)" : allowedGroups),
+                    " - " + world.getName() + alias + border + " → "
+                            + (allowedGroups.isEmpty() ? "(none)" : allowedGroups),
                     allowedGroups.isEmpty() ? NamedTextColor.DARK_GRAY : NamedTextColor.GREEN
             ));
+        }
+        if (hook.isPresent()) {
+            List<String> managed = hook.access().listManagedWorldNames();
+            sender.sendMessage(Component.text("Multiverse managed (" + managed.size() + "): " + managed,
+                    NamedTextColor.DARK_AQUA));
         }
     }
 

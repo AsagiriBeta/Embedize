@@ -47,11 +47,6 @@ public final class BorderListener implements Listener {
 
     @EventHandler
     public void onWorldLoad(WorldLoadEvent event) {
-        // Borders persist by world name in borders.yml — nothing to re-apply to vanilla border.
-        // Confirming a matching config exists helps operators verify resource-world resets.
-        plugin.getBorderManager().getBorder(event.getWorld().getName()).ifPresent(border ->
-                plugin.getLogger().info("Border active for reloaded/created world '"
-                        + event.getWorld().getName() + "': " + border)
-        );
+        plugin.getBorderManager().onWorldReady(event.getWorld().getName());
     }
 }

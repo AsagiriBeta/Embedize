@@ -1,7 +1,8 @@
 # Embedize
 #
-# Place structure datapacks yourself in the world datapacks folder.
-# This plugin only isolates their natural generation via groups (groups.yml).
+# Place structure datapacks yourself in the world datapacks/ folder.
+# This plugin isolates their natural generation via groups (groups.yml)
+# and optionally enforces invisible knockback borders (borders.yml).
 # Vanilla minecraft: structures are never touched.
 
 enabled: true
@@ -15,10 +16,13 @@ deny-unresolved-structure-keys: false
 debug-cancellations: false
 
 datapacks:
-  # Optional: install a small TFG biome-tag bridge from this plugin's jar
-  # (not a third-party structure pack). Disable if unused.
+  # Optional datapack that maps TerraformGenerator custom biomes into DnT biome tags.
+  # TFG has no public plugin API — this is a datapack workaround only.
+  # Custom biomes: muddy_bog, cherry_grove, scarlet_forest, crystalline_cluster
   install-tfg-bridge: true
   install-directory: default-world
 
 multiverse:
+  # Resolve Multiverse world aliases when matching groups.yml allowed-worlds
+  # Uses Multiverse-Core 5 API (MultiverseCoreApi / WorldManager). Soft-depend.
   resolve-aliases: true

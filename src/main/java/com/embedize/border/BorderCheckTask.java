@@ -81,6 +81,8 @@ public final class BorderCheckTask implements Runnable {
         if (newLoc == null) {
             newLoc = player.getWorld().getSpawnLocation();
         }
+        // Prefer Multiverse BlockSafety when available (official MV5 API)
+        newLoc = plugin.getMultiverseHook().access().findSafeLocation(newLoc).orElse(newLoc);
 
         final boolean handlingVehicle;
         if (player.isInsideVehicle()) {

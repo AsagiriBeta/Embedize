@@ -21,8 +21,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 
 /**
- * Optional helper: installs the plugin-bundled TerraformGenerator biome-tag bridge.
- * Structure datapacks themselves are not downloaded — place them in the world datapacks folder.
+ * Installs Embedize's optional TerraformGenerator <b>biome-tag bridge datapack</b>.
+ * <p>
+ * TerraformGenerator does not expose a public plugin API for third-party plugins
+ * (confirmed against upstream wiki/source). Compatibility is therefore datapack-only:
+ * map {@code terraformgenerator:*} custom biomes into DnT {@code nova_structures}
+ * biome collection tags so structures can spawn in TFG worlds.
+ * Structure datapacks themselves are never downloaded — place them in the world datapacks folder.
  */
 public final class DatapackService {
 
@@ -99,7 +104,8 @@ public final class DatapackService {
         Files.createDirectories(target);
         copyResourceTree(resourceRoot, target);
         Files.writeString(marker, pluginVersion);
-        plugin.getLogger().info("Installed TerraformGenerator biome bridge datapack → " + target.getFileName());
+        plugin.getLogger().info("Installed TFG biome-tag bridge datapack → " + target.getFileName()
+                + " (datapack workaround; not a TerraformGenerator API)");
         return true;
     }
 
@@ -178,7 +184,7 @@ public final class DatapackService {
             return;
         }
         SchedulerUtil.runGlobal(plugin, () -> plugin.getLogger().warning(
-                "TFG biome bridge datapack was installed/updated. Run /minecraft:reload or restart "
+                "TFG biome-tag bridge datapack was installed/updated. Run /minecraft:reload or restart "
                         + "so it becomes active. Isolation filtering works immediately."
         ));
     }
@@ -187,7 +193,7 @@ public final class DatapackService {
         try {
             Path dir = resolveDatapacksDirectory();
             boolean tfg = Files.isDirectory(dir.resolve(TFG_BRIDGE_FOLDER));
-            return "datapacksDir=" + dir.toAbsolutePath() + " tfgBridge=" + tfg;
+            return "datapacksDir=" + dir.toAbsolutePath() + " tfgBiomeBridge=" + tfg;
         } catch (IOException e) {
             return "error: " + e.getMessage();
         }

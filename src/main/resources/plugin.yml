@@ -4,7 +4,7 @@ main: com.embedize.EmbedizePlugin
 api-version: '1.21'
 folia-supported: true
 authors: [Embedize]
-description: Isolate structure datapacks and enforce invisible per-world borders.
+description: Structure datapack isolation + invisible knockback borders for Paper/Folia.
 softdepend: [Multiverse-Core, TerraformGenerator, LuckPerms]
 commands:
   embedize:

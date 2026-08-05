@@ -31,10 +31,10 @@ public final class StructureIsolationListener implements Listener {
     private final AtomicLong allowed = new AtomicLong();
     private final AtomicLong passed = new AtomicLong();
 
-    public StructureIsolationListener(EmbedizePlugin plugin, PluginConfig config) {
+    public StructureIsolationListener(EmbedizePlugin plugin, PluginConfig config, MultiverseHook multiverseHook) {
         this.plugin = plugin;
         this.config = config;
-        this.multiverseHook = new MultiverseHook(plugin.getLogger());
+        this.multiverseHook = multiverseHook;
     }
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = false)

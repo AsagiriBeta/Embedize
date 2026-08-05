@@ -4,6 +4,7 @@ import com.embedize.border.BorderListener;
 import com.embedize.border.BorderManager;
 import com.embedize.command.EmbedizeCommand;
 import com.embedize.compat.LuckPermsHook;
+import com.embedize.compat.MultiverseHook;
 import com.embedize.config.PluginConfig;
 import com.embedize.datapack.DatapackService;
 import com.embedize.group.GroupManager;
@@ -19,6 +20,7 @@ public final class EmbedizePlugin extends JavaPlugin {
     private DatapackService datapackService;
     private StructureIsolationListener isolationListener;
     private LuckPermsHook luckPermsHook;
+    private MultiverseHook multiverseHook;
 
     @Override
     public void onEnable() {
@@ -37,8 +39,13 @@ public final class EmbedizePlugin extends JavaPlugin {
         this.borderManager = new BorderManager(this);
         this.borderManager.load();
 
+        // Soft Multiverse-Core 5 typed API (MultiverseCoreApi.whenLoaded / ServicesManager)
+        // Docs: https://mvplugins.org/core/developers/developer-api-starter/
+        this.multiverseHook = new MultiverseHook(this);
+        this.pluginConfig.setMultiverseHook(multiverseHook);
+
         this.datapackService = new DatapackService(this, pluginConfig);
-        this.isolationListener = new StructureIsolationListener(this, pluginConfig);
+        this.isolationListener = new StructureIsolationListener(this, pluginConfig, multiverseHook);
         getServer().getPluginManager().registerEvents(isolationListener, this);
         getServer().getPluginManager().registerEvents(new BorderListener(this), this);
 
@@ -49,17 +56,22 @@ public final class EmbedizePlugin extends JavaPlugin {
             pluginCommand.setTabCompleter(command);
         }
 
-        SchedulerUtil.runAsync(this, () -> {
-            try {
-                datapackService.ensureInstalled();
-            } catch (Exception e) {
-                getLogger().severe("Failed to install TFG biome bridge: " + e.getMessage());
-                e.printStackTrace();
-            }
-        });
+        // Optional TFG biome-tag datapack (not a TFG API — TFG has none for plugins)
+        if (pluginConfig.isInstallTfgBridge()) {
+            SchedulerUtil.runAsync(this, () -> {
+                try {
+                    datapackService.ensureInstalled();
+                } catch (Exception e) {
+                    getLogger().severe("Failed to install TFG biome-tag bridge: " + e.getMessage());
+                    e.printStackTrace();
+                }
+            });
+        }
 
-        getLogger().info("Embedize enabled. groups=" + groupManager.ids()
-                + " borders=" + borderManager.worldNames());
+        getLogger().info("Embedize " + getDescription().getVersion() + " enabled. groups="
+                + groupManager.ids() + " borders=" + borderManager.worldNames()
+                + " multiverse=" + multiverseHook.isPresent()
+                + " tfg=" + multiverseHook.isTerraformGeneratorPresent());
     }
 
     @Override
@@ -96,6 +108,10 @@ public final class EmbedizePlugin extends JavaPlugin {
 
     public LuckPermsHook getLuckPermsHook() {
         return luckPermsHook;
+    }
+
+    public MultiverseHook getMultiverseHook() {
+        return multiverseHook;
     }
 
     public void reloadPlugin() {

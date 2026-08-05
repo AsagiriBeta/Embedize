@@ -1,6 +1,7 @@
 package com.embedize.config;
 
 import com.embedize.EmbedizePlugin;
+import com.embedize.compat.MultiverseHook;
 import com.embedize.group.GroupManager;
 import com.embedize.group.StructureGroup;
 import com.embedize.structure.IsolationPolicy;
@@ -22,6 +23,7 @@ public final class PluginConfig {
     private boolean resolveAliases;
     private IsolationPolicy isolationPolicy;
     private GroupManager groupManager;
+    private MultiverseHook multiverseHook;
 
     public PluginConfig(EmbedizePlugin plugin) {
         this.plugin = plugin;
@@ -29,6 +31,11 @@ public final class PluginConfig {
 
     public void setGroupManager(GroupManager groupManager) {
         this.groupManager = groupManager;
+    }
+
+    public void setMultiverseHook(MultiverseHook multiverseHook) {
+        this.multiverseHook = multiverseHook;
+        rebuildIsolationPolicy();
     }
 
     public void reload() {
@@ -61,10 +68,10 @@ public final class PluginConfig {
                 if (group.allowsWorld(worldName)) {
                     return true;
                 }
-                if (!resolveAliases || groupManager == null) {
+                if (!resolveAliases || multiverseHook == null) {
                     return false;
                 }
-                return false;
+                return multiverseHook.matchesConfiguredWorld(worldName, group.getAllowedWorlds(), true);
             }
         };
         this.isolationPolicy = new IsolationPolicy(enabled, denyUnresolvedKeys, manageUngrouped, resolver);

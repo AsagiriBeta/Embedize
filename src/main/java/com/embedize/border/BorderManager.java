@@ -186,6 +186,21 @@ public final class BorderManager {
         }
     }
 
+    /**
+     * Called when Multiverse loads/creates/regens a world. Borders are keyed by
+     * world name, so no remapping is needed — just confirm persistence.
+     */
+    public synchronized void onWorldReady(String worldName) {
+        if (worldName == null || worldName.isBlank()) {
+            return;
+        }
+        Optional<WorldBorderData> existing = getBorder(worldName);
+        if (existing.isPresent()) {
+            plugin.getLogger().info("Border still active for Multiverse world '" + worldName + "': "
+                    + existing.get());
+        }
+    }
+
     static String normalizeWorld(String name) {
         return name == null ? "" : name.trim();
     }
