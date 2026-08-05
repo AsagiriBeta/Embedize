@@ -8,14 +8,14 @@ import java.util.stream.Collectors;
 
 /**
  * Whitelist-only isolation for datapack structures.
- * Vanilla {@code minecraft:} structures are never managed unless {@code includeVanilla} is true.
+ * Vanilla {@code minecraft:} structures are never managed.
  */
 public final class IsolationPolicy {
 
     public static final String VANILLA_NAMESPACE = "minecraft";
 
     public enum StructureFilterMode {
-        /** Only configured namespaces (e.g. nova_structures). Never includes minecraft unless includeVanilla. */
+        /** Only configured namespaces (e.g. nova_structures). */
         NAMESPACES,
         /** Every non-minecraft namespace. */
         ALL_NON_MINECRAFT
@@ -31,7 +31,6 @@ public final class IsolationPolicy {
     }
 
     private final boolean enabled;
-    private final boolean includeVanilla;
     private final StructureFilterMode filterMode;
     private final Set<String> allowedWorlds;
     private final Set<String> namespaces;
@@ -39,17 +38,15 @@ public final class IsolationPolicy {
 
     public IsolationPolicy(
             boolean enabled,
-            boolean includeVanilla,
             StructureFilterMode filterMode,
             Set<String> allowedWorlds,
             Set<String> namespaces,
             boolean denyUnresolvedKeys
     ) {
         this.enabled = enabled;
-        this.includeVanilla = includeVanilla;
         this.filterMode = Objects.requireNonNull(filterMode);
         this.allowedWorlds = Set.copyOf(normalize(allowedWorlds));
-        this.namespaces = Set.copyOf(sanitizeNamespaces(namespaces, includeVanilla));
+        this.namespaces = Set.copyOf(sanitizeNamespaces(namespaces));
         this.denyUnresolvedKeys = denyUnresolvedKeys;
     }
 
@@ -58,10 +55,9 @@ public final class IsolationPolicy {
             return Decision.PASS;
         }
         if (namespace == null || namespace.isBlank()) {
-            // Unknown identity: do not cancel by default — avoids touching vanilla/unidentified structures
             return denyUnresolvedKeys ? Decision.DENY : Decision.PASS;
         }
-        if (isVanillaNamespace(namespace) && !includeVanilla) {
+        if (isVanillaNamespace(namespace)) {
             return Decision.PASS;
         }
         if (!isManagedNamespace(namespace)) {
@@ -78,7 +74,7 @@ public final class IsolationPolicy {
         if (namespace == null || namespace.isBlank()) {
             return denyUnresolvedKeys ? Decision.DENY : Decision.PASS;
         }
-        if (isVanillaNamespace(namespace) && !includeVanilla) {
+        if (isVanillaNamespace(namespace)) {
             return Decision.PASS;
         }
         if (!isManagedNamespace(namespace)) {
@@ -92,31 +88,22 @@ public final class IsolationPolicy {
 
     public boolean isManagedNamespace(String namespace) {
         String ns = normalizeOne(namespace);
-        if (ns == null) {
-            return false;
-        }
-        // Hard guard: never manage vanilla unless explicitly opted in
-        if (isVanillaNamespace(ns) && !includeVanilla) {
+        if (ns == null || isVanillaNamespace(ns)) {
             return false;
         }
         return switch (filterMode) {
-            case ALL_NON_MINECRAFT -> !isVanillaNamespace(ns);
+            case ALL_NON_MINECRAFT -> true;
             case NAMESPACES -> namespaces.contains(ns);
         };
     }
 
     public static boolean isVanillaNamespace(String namespace) {
-        String ns = normalizeOne(namespace);
-        return VANILLA_NAMESPACE.equals(ns);
+        return VANILLA_NAMESPACE.equals(normalizeOne(namespace));
     }
 
     public boolean isAllowedWorldListed(String worldName) {
         String world = normalizeOne(worldName);
         return world != null && allowedWorlds.contains(world);
-    }
-
-    public boolean isIncludeVanilla() {
-        return includeVanilla;
     }
 
     public StructureFilterMode getFilterMode() {
@@ -131,9 +118,9 @@ public final class IsolationPolicy {
         return namespaces;
     }
 
-    private static Set<String> sanitizeNamespaces(Collection<String> values, boolean includeVanilla) {
+    private static Set<String> sanitizeNamespaces(Collection<String> values) {
         return normalize(values).stream()
-                .filter(ns -> includeVanilla || !VANILLA_NAMESPACE.equals(ns))
+                .filter(ns -> !VANILLA_NAMESPACE.equals(ns))
                 .collect(Collectors.toCollection(java.util.LinkedHashSet::new));
     }
 

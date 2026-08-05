@@ -1,32 +1,28 @@
 # Embedize — whitelist isolation for structure datapacks
 #
-# Managed (non-vanilla) structures generate ONLY in allowed-worlds.
-# Vanilla minecraft: structures are NEVER cancelled — they generate in every world as usual.
+# Datapack structures generate ONLY in allowed-worlds.
+# Vanilla minecraft: structures are never touched (any world).
 # Manual /place is unaffected.
 
 enabled: true
 
 # Worlds that MAY receive managed structure datapacks (e.g. DnT).
-# Vanilla villages/strongholds/etc. ignore this list and generate everywhere normally.
 allowed-worlds:
   - resource
 
-# Which structures Embedize manages (never minecraft: unless include-vanilla: true):
-#   ALL_NON_MINECRAFT — all datapack/mod namespaces (recommended)
+# Which datapack structures Embedize manages:
+#   ALL_NON_MINECRAFT — all non-vanilla namespaces (recommended)
 #   NAMESPACES        — only the listed namespaces
 structure-filter:
   mode: ALL_NON_MINECRAFT
-  include-vanilla: false
   namespaces:
     - nova_structures
 
-# If true, cancel when structure key cannot be resolved. Default false = leave alone (safer).
+# If true, cancel when structure key cannot be resolved. Default false = leave alone.
 deny-unresolved-structure-keys: false
 
-# Verbose per-structure allow/deny logging (spammy on busy servers).
 debug-cancellations: false
 
-# --- Optional datapack installers ---
 datapacks:
   install-tfg-bridge: true
 

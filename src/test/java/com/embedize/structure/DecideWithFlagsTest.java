@@ -10,7 +10,6 @@ class DecideWithFlagsTest {
     private IsolationPolicy policy() {
         return new IsolationPolicy(
                 true,
-                false,
                 IsolationPolicy.StructureFilterMode.ALL_NON_MINECRAFT,
                 Set.of("resource"),
                 Set.of("nova_structures"),
