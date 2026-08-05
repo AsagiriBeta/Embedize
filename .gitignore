@@ -1,0 +1,15 @@
+.gradle/
+build/
+out/
+.idea/
+*.iml
+*.ipr
+*.iws
+.classpath
+.project
+.settings/
+bin/
+run/
+*.log
+.DS_Store
+plugins/DimensionStructureIsolator/cache/

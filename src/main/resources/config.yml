@@ -1,0 +1,55 @@
+# DimensionStructureIsolator
+# Isolates datapack structure generation to configured worlds (Multiverse dimensions).
+
+# Master switch
+enabled: true
+
+# Isolation mode:
+#   ALLOWLIST - managed structures ONLY spawn in listed worlds
+#   DENYLIST  - managed structures spawn everywhere EXCEPT listed worlds
+mode: ALLOWLIST
+
+# Worlds where managed structures are allowed (ALLOWLIST) or blocked (DENYLIST).
+# Use Multiverse world names (e.g. dungeons_world created with TerraformGenerator).
+# Default overworld/nether/end are typically NOT listed so they stay clean.
+allowed-worlds:
+  - dungeons_world
+
+# Structure namespaces to isolate. DnT uses nova_structures.
+managed-namespaces:
+  - nova_structures
+
+# If true, also isolate structures whose key contains any of these prefixes
+# (useful for addon packs that share naming conventions).
+# managed-key-prefixes: []
+
+# When a structure is cancelled in a non-allowed world, log at DEBUG (very spammy if true).
+debug-cancellations: false
+
+# --- Bundled / downloaded datapacks ---
+datapacks:
+  # Auto-install the TerraformGenerator biome bridge (authored by this plugin).
+  # Adds TFG custom biomes into DnT biome collections so structures can appear there.
+  install-tfg-bridge: true
+
+  # Dungeons and Taverns (ARR third-party). Not redistributed in git;
+  # downloaded from Modrinth and cached under plugins/DimensionStructureIsolator/cache/.
+  dungeons-and-taverns:
+    enabled: true
+    # auto | skip
+    # auto = download matching version from Modrinth if missing, then install into datapacks folder
+    install: auto
+    # Modrinth project slug
+    modrinth-project: dungeons-and-taverns
+    # Prefer datapack ZIP over Fabric/Forge/NeoForge mod JARs
+    prefer-datapack-zip: true
+    # Optional pin (version_number). Empty = pick best match for this server's MC version.
+    # pinned-version: "5.3.0"
+
+  # Destination for installed datapacks. "default-world" uses the server's primary world datapacks folder.
+  # You can also set an absolute path.
+  install-directory: default-world
+
+# Multiverse-Core: resolve world aliases when matching allowed-worlds (if MV is present).
+multiverse:
+  resolve-aliases: true
