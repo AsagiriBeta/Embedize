@@ -4,32 +4,34 @@ import java.util.Collection;
 import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
- * Whitelist-only isolation: managed structures generate ONLY in {@code allowed-worlds}.
- * Every other world is denied. Unmanaged namespaces are left alone ({@link Decision#PASS}).
+ * Whitelist-only isolation for datapack structures.
+ * Vanilla {@code minecraft:} structures are never managed unless {@code includeVanilla} is true.
  */
 public final class IsolationPolicy {
 
+    public static final String VANILLA_NAMESPACE = "minecraft";
+
     public enum StructureFilterMode {
-        /** Only configured namespaces (e.g. nova_structures, my_pack). */
+        /** Only configured namespaces (e.g. nova_structures). Never includes minecraft unless includeVanilla. */
         NAMESPACES,
-        /** Every structure whose namespace is not {@code minecraft}. */
-        ALL_NON_MINECRAFT,
-        /** Every structure including vanilla (rarely wanted). */
-        ALL
+        /** Every non-minecraft namespace. */
+        ALL_NON_MINECRAFT
     }
 
     public enum Decision {
-        /** Not managed by Embedize — leave vanilla/other plugins alone. */
+        /** Not managed — Embedize does not cancel (vanilla / unmanaged packs). */
         PASS,
-        /** Managed and world is on the whitelist — let generation proceed. */
+        /** Managed and world is on the whitelist. */
         ALLOW,
-        /** Managed and world is not on the whitelist — cancel generation. */
+        /** Managed and world is not on the whitelist — cancel. */
         DENY
     }
 
     private final boolean enabled;
+    private final boolean includeVanilla;
     private final StructureFilterMode filterMode;
     private final Set<String> allowedWorlds;
     private final Set<String> namespaces;
@@ -37,15 +39,17 @@ public final class IsolationPolicy {
 
     public IsolationPolicy(
             boolean enabled,
+            boolean includeVanilla,
             StructureFilterMode filterMode,
             Set<String> allowedWorlds,
             Set<String> namespaces,
             boolean denyUnresolvedKeys
     ) {
         this.enabled = enabled;
+        this.includeVanilla = includeVanilla;
         this.filterMode = Objects.requireNonNull(filterMode);
         this.allowedWorlds = Set.copyOf(normalize(allowedWorlds));
-        this.namespaces = Set.copyOf(normalize(namespaces));
+        this.namespaces = Set.copyOf(sanitizeNamespaces(namespaces, includeVanilla));
         this.denyUnresolvedKeys = denyUnresolvedKeys;
     }
 
@@ -54,7 +58,11 @@ public final class IsolationPolicy {
             return Decision.PASS;
         }
         if (namespace == null || namespace.isBlank()) {
+            // Unknown identity: do not cancel by default — avoids touching vanilla/unidentified structures
             return denyUnresolvedKeys ? Decision.DENY : Decision.PASS;
+        }
+        if (isVanillaNamespace(namespace) && !includeVanilla) {
+            return Decision.PASS;
         }
         if (!isManagedNamespace(namespace)) {
             return Decision.PASS;
@@ -66,12 +74,12 @@ public final class IsolationPolicy {
         return allowedWorlds.contains(world) ? Decision.ALLOW : Decision.DENY;
     }
 
-    /**
-     * Whitelist check with Multiverse alias resolution already folded into {@code listed}.
-     */
     public Decision decideWithFlags(String namespace, String key, boolean listed) {
         if (namespace == null || namespace.isBlank()) {
             return denyUnresolvedKeys ? Decision.DENY : Decision.PASS;
+        }
+        if (isVanillaNamespace(namespace) && !includeVanilla) {
+            return Decision.PASS;
         }
         if (!isManagedNamespace(namespace)) {
             return Decision.PASS;
@@ -87,16 +95,28 @@ public final class IsolationPolicy {
         if (ns == null) {
             return false;
         }
+        // Hard guard: never manage vanilla unless explicitly opted in
+        if (isVanillaNamespace(ns) && !includeVanilla) {
+            return false;
+        }
         return switch (filterMode) {
-            case ALL -> true;
-            case ALL_NON_MINECRAFT -> !"minecraft".equals(ns);
+            case ALL_NON_MINECRAFT -> !isVanillaNamespace(ns);
             case NAMESPACES -> namespaces.contains(ns);
         };
+    }
+
+    public static boolean isVanillaNamespace(String namespace) {
+        String ns = normalizeOne(namespace);
+        return VANILLA_NAMESPACE.equals(ns);
     }
 
     public boolean isAllowedWorldListed(String worldName) {
         String world = normalizeOne(worldName);
         return world != null && allowedWorlds.contains(world);
+    }
+
+    public boolean isIncludeVanilla() {
+        return includeVanilla;
     }
 
     public StructureFilterMode getFilterMode() {
@@ -111,6 +131,12 @@ public final class IsolationPolicy {
         return namespaces;
     }
 
+    private static Set<String> sanitizeNamespaces(Collection<String> values, boolean includeVanilla) {
+        return normalize(values).stream()
+                .filter(ns -> includeVanilla || !VANILLA_NAMESPACE.equals(ns))
+                .collect(Collectors.toCollection(java.util.LinkedHashSet::new));
+    }
+
     private static String normalizeOne(String value) {
         if (value == null || value.isBlank()) {
             return null;
@@ -122,6 +148,6 @@ public final class IsolationPolicy {
         return values.stream()
                 .map(IsolationPolicy::normalizeOne)
                 .filter(Objects::nonNull)
-                .collect(java.util.stream.Collectors.toCollection(java.util.LinkedHashSet::new));
+                .collect(Collectors.toCollection(java.util.LinkedHashSet::new));
     }
 }

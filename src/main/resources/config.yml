@@ -1,31 +1,32 @@
 # Embedize — whitelist isolation for structure datapacks
 #
-# Managed structures naturally generate ONLY in allowed-worlds.
-# All other worlds are denied. Manual /place is unaffected.
+# Managed (non-vanilla) structures generate ONLY in allowed-worlds.
+# Vanilla minecraft: structures are NEVER cancelled — they generate in every world as usual.
+# Manual /place is unaffected.
 
 enabled: true
 
-# Worlds that MAY receive managed structure datapacks.
-# Example: only "resource" → default "world" gets nothing.
+# Worlds that MAY receive managed structure datapacks (e.g. DnT).
+# Vanilla villages/strongholds/etc. ignore this list and generate everywhere normally.
 allowed-worlds:
   - resource
 
-# Which structures are managed:
-#   ALL_NON_MINECRAFT — all non-vanilla namespaces (recommended)
+# Which structures Embedize manages (never minecraft: unless include-vanilla: true):
+#   ALL_NON_MINECRAFT — all datapack/mod namespaces (recommended)
 #   NAMESPACES        — only the listed namespaces
-#   ALL               — including vanilla minecraft: structures
 structure-filter:
   mode: ALL_NON_MINECRAFT
+  include-vanilla: false
   namespaces:
     - nova_structures
 
-# If a structure key cannot be resolved, deny placement (fail-closed).
-deny-unresolved-structure-keys: true
+# If true, cancel when structure key cannot be resolved. Default false = leave alone (safer).
+deny-unresolved-structure-keys: false
 
 # Verbose per-structure allow/deny logging (spammy on busy servers).
 debug-cancellations: false
 
-# --- Optional datapack installers (DnT is one preset; more can be added later) ---
+# --- Optional datapack installers ---
 datapacks:
   install-tfg-bridge: true
 
@@ -34,7 +35,6 @@ datapacks:
     install: auto
     modrinth-project: dungeons-and-taverns
     prefer-datapack-zip: true
-    # pinned-version: "5.3.0"
 
   install-directory: default-world
 

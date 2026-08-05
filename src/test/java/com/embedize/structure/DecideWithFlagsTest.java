@@ -10,10 +10,11 @@ class DecideWithFlagsTest {
     private IsolationPolicy policy() {
         return new IsolationPolicy(
                 true,
+                false,
                 IsolationPolicy.StructureFilterMode.ALL_NON_MINECRAFT,
                 Set.of("resource"),
                 Set.of("nova_structures"),
-                true
+                false
         );
     }
 
@@ -25,8 +26,9 @@ class DecideWithFlagsTest {
     }
 
     @Test
-    void vanillaPasses() {
+    void vanillaAlwaysPasses() {
         IsolationPolicy p = policy();
         Assertions.assertEquals(IsolationPolicy.Decision.PASS, p.decideWithFlags("minecraft", "village_plains", false));
+        Assertions.assertEquals(IsolationPolicy.Decision.PASS, p.decideWithFlags("minecraft", "village_plains", true));
     }
 }

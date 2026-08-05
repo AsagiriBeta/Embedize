@@ -38,19 +38,38 @@ public final class PluginConfig {
     public void reload() {
         FileConfiguration cfg = plugin.getConfig();
         this.enabled = cfg.getBoolean("enabled", true);
-        this.denyUnresolvedKeys = cfg.getBoolean("deny-unresolved-structure-keys", true);
+        // Default false: never cancel unidentified structures (safer for vanilla)
+        this.denyUnresolvedKeys = cfg.getBoolean("deny-unresolved-structure-keys", false);
         this.allowedWorlds = toLowerSet(cfg.getStringList("allowed-worlds"));
 
         ConfigurationSection filter = cfg.getConfigurationSection("structure-filter");
+        boolean includeVanilla = filter != null && filter.getBoolean("include-vanilla", false);
+        if (cfg.contains("include-vanilla")) {
+            includeVanilla = cfg.getBoolean("include-vanilla", false);
+        }
         this.filterMode = parseFilterMode(filter == null
                 ? cfg.getString("structure-filter-mode", "ALL_NON_MINECRAFT")
                 : filter.getString("mode", "ALL_NON_MINECRAFT"));
+        // Legacy "ALL" meant include vanilla — map to ALL_NON_MINECRAFT + warn unless opted in
+        String rawMode = filter == null ? cfg.getString("structure-filter-mode") : filter.getString("mode");
+        if (rawMode != null && rawMode.trim().equalsIgnoreCase("ALL")) {
+            if (!includeVanilla) {
+                plugin.getLogger().warning("structure-filter.mode ALL is no longer used. "
+                        + "Vanilla minecraft: structures are never managed unless include-vanilla: true. "
+                        + "Using ALL_NON_MINECRAFT.");
+            }
+            this.filterMode = IsolationPolicy.StructureFilterMode.ALL_NON_MINECRAFT;
+        }
         List<String> nsList = filter != null
                 ? filter.getStringList("namespaces")
                 : cfg.getStringList("managed-namespaces");
         this.managedNamespaces = toLowerSet(nsList);
         if (managedNamespaces.isEmpty() && filterMode == IsolationPolicy.StructureFilterMode.NAMESPACES) {
             managedNamespaces = Set.of("nova_structures");
+        }
+        if (!includeVanilla && managedNamespaces.contains("minecraft")) {
+            plugin.getLogger().warning("Ignoring 'minecraft' in structure-filter.namespaces "
+                    + "(vanilla is not managed unless include-vanilla: true).");
         }
 
         this.debugCancellations = cfg.getBoolean("debug-cancellations", false);
@@ -74,6 +93,7 @@ public final class PluginConfig {
 
         this.isolationPolicy = new IsolationPolicy(
                 enabled,
+                includeVanilla,
                 filterMode,
                 allowedWorlds,
                 managedNamespaces,
