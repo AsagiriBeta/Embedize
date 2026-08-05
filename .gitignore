@@ -13,5 +13,4 @@ run/
 *.log
 .DS_Store
 plugins/Embedize/cache/
-
 test-server/

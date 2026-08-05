@@ -30,8 +30,6 @@ public final class EmbedizePlugin extends JavaPlugin {
 
         this.groupManager.load();
         this.pluginConfig.reload();
-        this.groupManager.syncConfiguredSources();
-        this.pluginConfig.rebuildIsolationPolicy();
 
         this.datapackService = new DatapackService(this, pluginConfig);
         this.isolationListener = new StructureIsolationListener(this, pluginConfig);
@@ -44,11 +42,12 @@ public final class EmbedizePlugin extends JavaPlugin {
             pluginCommand.setTabCompleter(command);
         }
 
+        // Optional TFG biome bridge only (not structure pack downloads)
         SchedulerUtil.runAsync(this, () -> {
             try {
                 datapackService.ensureInstalled();
             } catch (Exception e) {
-                getLogger().severe("Failed to install datapacks: " + e.getMessage());
+                getLogger().severe("Failed to install TFG biome bridge: " + e.getMessage());
                 e.printStackTrace();
             }
         });
@@ -88,8 +87,6 @@ public final class EmbedizePlugin extends JavaPlugin {
         reloadConfig();
         groupManager.load();
         pluginConfig.reload();
-        groupManager.syncConfiguredSources();
-        pluginConfig.rebuildIsolationPolicy();
         getLogger().info("Configuration reloaded. groups=" + groupManager.ids());
     }
 }

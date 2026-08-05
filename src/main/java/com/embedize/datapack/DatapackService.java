@@ -7,8 +7,6 @@ import org.bukkit.Bukkit;
 import org.bukkit.World;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.net.URI;
 import java.nio.file.FileSystem;
 import java.nio.file.FileSystems;
@@ -19,45 +17,34 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.Collections;
-import java.util.Locale;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Stream;
 
+/**
+ * Optional helper: installs the plugin-bundled TerraformGenerator biome-tag bridge.
+ * Structure datapacks themselves are not downloaded — place them in the world datapacks folder.
+ */
 public final class DatapackService {
 
     public static final String TFG_BRIDGE_FOLDER = "embedize-tfg-biome-bridge";
-    public static final String DNT_FOLDER = "embedize-dungeons-and-taverns";
 
     private final EmbedizePlugin plugin;
     private final PluginConfig config;
-    private final ModrinthDatapackDownloader modrinthDownloader;
     private final AtomicBoolean restartHintPrinted = new AtomicBoolean(false);
 
     public DatapackService(EmbedizePlugin plugin, PluginConfig config) {
         this.plugin = plugin;
         this.config = config;
-        this.modrinthDownloader = new ModrinthDatapackDownloader(plugin);
     }
 
-    public void ensureInstalled() throws IOException, InterruptedException {
+    public void ensureInstalled() throws IOException {
+        if (!config.isInstallTfgBridge()) {
+            return;
+        }
         Path datapacksDir = resolveDatapacksDirectory();
         Files.createDirectories(datapacksDir);
-
-        boolean changed = false;
-        if (config.isInstallTfgBridge()) {
-            changed |= installTfgBridge(datapacksDir);
-        }
-        for (PluginConfig.DatapackSource source : config.getDatapackSources()) {
-            if (!source.enabled() || !"modrinth".equalsIgnoreCase(source.type())) {
-                continue;
-            }
-            changed |= installModrinthSource(datapacksDir, source);
-        }
-
-        if (changed) {
+        if (installTfgBridge(datapacksDir)) {
             maybeHintReload();
-        } else {
-            plugin.getLogger().info("Datapack install check complete (no changes) → " + datapacksDir);
         }
     }
 
@@ -76,7 +63,6 @@ public final class DatapackService {
             return primary.getWorldFolder().toPath().resolve("datapacks");
         }
 
-        // Worlds may not be loaded yet on Folia/async — fall back to world container + level-name
         Path container = Bukkit.getWorldContainer().toPath();
         Path levelName = container.resolve("world").resolve("datapacks");
         Path props = container.resolve("server.properties");
@@ -117,54 +103,7 @@ public final class DatapackService {
         return true;
     }
 
-    private boolean installModrinthSource(Path datapacksDir, PluginConfig.DatapackSource source)
-            throws IOException, InterruptedException {
-        Path target = datapacksDir.resolve("embedize-" + source.id());
-        Path marker = target.resolve(".embedize-source");
-
-        Path sourceZip = modrinthDownloader.ensureCached(source);
-        String sourceKey = sourceZip.getFileName().toString() + ":" + Files.size(sourceZip);
-
-        if (Files.isDirectory(target) && Files.isRegularFile(marker)) {
-            String existing = Files.readString(marker).trim();
-            if (existing.equals(sourceKey)) {
-                return false;
-            }
-        }
-
-        if (Files.exists(target)) {
-            deleteRecursive(target);
-        }
-        Files.createDirectories(target);
-        unzip(sourceZip, target);
-        ensurePackMcmeta(target, source.id());
-        Files.writeString(marker, sourceKey);
-        plugin.getLogger().info("Installed datapack '" + source.id() + "' → " + target.getFileName());
-        return true;
-    }
-
-    /**
-     * Fabric/NeoForge mod jars often ship worldgen data without a root {@code pack.mcmeta}.
-     * Paper needs one to load the folder as a datapack.
-     */
-    static void ensurePackMcmeta(Path datapackRoot, String packId) throws IOException {
-        Path meta = datapackRoot.resolve("pack.mcmeta");
-        if (Files.isRegularFile(meta)) {
-            return;
-        }
-        String description = "Embedize installed pack: " + packId;
-        String json = "{\n"
-                + "  \"pack\": {\n"
-                + "    \"pack_format\": 48,\n"
-                + "    \"supported_formats\": {\"min_inclusive\": 1, \"max_inclusive\": 1000},\n"
-                + "    \"description\": \"" + description.replace("\"", "'") + "\"\n"
-                + "  }\n"
-                + "}\n";
-        Files.writeString(meta, json);
-    }
-
     private void copyResourceTree(String resourceRoot, Path targetDir) throws IOException {
-        // Walk jar resources via classloader listing is awkward; copy known tree from jar FileSystem
         URI codeSource;
         try {
             codeSource = plugin.getClass().getProtectionDomain().getCodeSource().getLocation().toURI();
@@ -174,7 +113,6 @@ public final class DatapackService {
 
         Path jarPath = Path.of(codeSource);
         if (Files.isDirectory(jarPath)) {
-            // Running from classes dir (dev)
             Path root = jarPath.resolve(resourceRoot);
             if (!Files.isDirectory(root)) {
                 throw new IOException("Missing resource tree: " + root);
@@ -186,7 +124,6 @@ public final class DatapackService {
         try (FileSystem fs = FileSystems.newFileSystem(jarPath, Collections.emptyMap())) {
             Path root = fs.getPath(resourceRoot);
             if (!Files.isDirectory(root)) {
-                // jar paths may lack trailing semantics
                 root = fs.getPath("/" + resourceRoot);
             }
             if (!Files.isDirectory(root)) {
@@ -217,34 +154,6 @@ public final class DatapackService {
         });
     }
 
-    private static void unzip(Path zipFile, Path targetDir) throws IOException {
-        try (FileSystem fs = FileSystems.newFileSystem(zipFile, Collections.emptyMap())) {
-            for (Path root : fs.getRootDirectories()) {
-                Files.walkFileTree(root, new SimpleFileVisitor<>() {
-                    @Override
-                    public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
-                        Path rel = root.relativize(dir);
-                        if (!rel.toString().isEmpty()) {
-                            Files.createDirectories(targetDir.resolve(rel.toString()));
-                        }
-                        return FileVisitResult.CONTINUE;
-                    }
-
-                    @Override
-                    public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                        Path rel = root.relativize(file);
-                        Path dest = targetDir.resolve(rel.toString());
-                        Files.createDirectories(dest.getParent());
-                        try (InputStream in = Files.newInputStream(file); OutputStream out = Files.newOutputStream(dest)) {
-                            in.transferTo(out);
-                        }
-                        return FileVisitResult.CONTINUE;
-                    }
-                });
-            }
-        }
-    }
-
     private static void deleteRecursive(Path path) throws IOException {
         if (!Files.exists(path)) {
             return;
@@ -269,8 +178,8 @@ public final class DatapackService {
             return;
         }
         SchedulerUtil.runGlobal(plugin, () -> plugin.getLogger().warning(
-                "Datapacks were installed/updated. Run /minecraft:reload or restart the server so DnT/TFG bridge become active. "
-                        + "Isolation filtering works immediately for already-loaded structure registries."
+                "TFG biome bridge datapack was installed/updated. Run /minecraft:reload or restart "
+                        + "so it becomes active. Isolation filtering works immediately."
         ));
     }
 
@@ -278,44 +187,9 @@ public final class DatapackService {
         try {
             Path dir = resolveDatapacksDirectory();
             boolean tfg = Files.isDirectory(dir.resolve(TFG_BRIDGE_FOLDER));
-            long installed = 0;
-            try (Stream<Path> stream = Files.list(dir)) {
-                installed = stream.filter(p -> p.getFileName().toString().startsWith("embedize-")).count();
-            }
-            return "datapacksDir=" + dir.toAbsolutePath()
-                    + " tfgBridge=" + tfg
-                    + " embedizePacks=" + installed
-                    + " mc=" + ModrinthDatapackDownloader.detectMinecraftVersion();
+            return "datapacksDir=" + dir.toAbsolutePath() + " tfgBridge=" + tfg;
         } catch (IOException e) {
             return "error: " + e.getMessage();
         }
-    }
-
-    public boolean forceReinstall() throws IOException, InterruptedException {
-        Path datapacksDir = resolveDatapacksDirectory();
-        Files.createDirectories(datapacksDir);
-        boolean changed = false;
-        if (config.isInstallTfgBridge()) {
-            Path target = datapacksDir.resolve(TFG_BRIDGE_FOLDER);
-            if (Files.exists(target)) {
-                deleteRecursive(target);
-            }
-            changed |= installTfgBridge(datapacksDir);
-        }
-        for (PluginConfig.DatapackSource source : config.getDatapackSources()) {
-            if (!source.enabled() || !"modrinth".equalsIgnoreCase(source.type())) {
-                continue;
-            }
-            Path target = datapacksDir.resolve("embedize-" + source.id());
-            if (Files.exists(target)) {
-                deleteRecursive(target);
-            }
-            changed |= installModrinthSource(datapacksDir, source);
-        }
-        if (changed) {
-            restartHintPrinted.set(false);
-            maybeHintReload();
-        }
-        return changed;
     }
 }

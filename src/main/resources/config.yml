@@ -1,7 +1,7 @@
 # Embedize
 #
-# Datapack structures are managed via groups (see groups.yml).
-# Each group has its own namespaces + allowed-worlds whitelist.
+# Place structure datapacks yourself in the world datapacks folder.
+# This plugin only isolates their natural generation via groups (groups.yml).
 # Vanilla minecraft: structures are never touched.
 
 enabled: true
@@ -15,31 +15,10 @@ deny-unresolved-structure-keys: false
 debug-cancellations: false
 
 datapacks:
+  # Optional: install a small TFG biome-tag bridge from this plugin's jar
+  # (not a third-party structure pack). Disable if unused.
   install-tfg-bridge: true
   install-directory: default-world
-
-  # Multiple structure datapacks can be listed here (Modrinth download / install).
-  # Link them to a group id from groups.yml via "group".
-  # prefer-datapack-zip: true prefers .zip; if none match the server version,
-  # Embedize falls back to Fabric/NeoForge .jar and synthesizes pack.mcmeta.
-  sources:
-    dungeons-and-taverns:
-      enabled: true
-      type: modrinth
-      modrinth-project: dungeons-and-taverns
-      prefer-datapack-zip: true
-      namespaces:
-        - nova_structures
-      group: dungeons
-
-    towns-and-towers:
-      enabled: true
-      type: modrinth
-      modrinth-project: towns-and-towers
-      prefer-datapack-zip: true
-      namespaces:
-        - towns_and_towers
-      group: towns
 
 multiverse:
   resolve-aliases: true

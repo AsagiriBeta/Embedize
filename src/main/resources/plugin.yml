@@ -9,7 +9,7 @@ softdepend: [Multiverse-Core, TerraformGenerator, LuckPerms]
 commands:
   embedize:
     description: Embedize admin commands
-    usage: /embedize <reload|status|worlds|install|group>
+    usage: /embedize <reload|status|worlds|group>
     permission: embedize.admin
     aliases: [emb, ez]
 permissions:
@@ -20,7 +20,6 @@ permissions:
       embedize.group.admin: true
       embedize.command.reload: true
       embedize.command.status: true
-      embedize.command.install: true
   embedize.group.admin:
     description: Manage all structure groups
     default: op
@@ -29,7 +28,4 @@ permissions:
     default: op
   embedize.command.status:
     description: View Embedize status
-    default: op
-  embedize.command.install:
-    description: Install datapacks
     default: op

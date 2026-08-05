@@ -75,7 +75,6 @@ public final class LuckPermsHook {
         ensurePermission(pm, PERM_GROUP_ADMIN, "Manage all Embedize structure groups", PermissionDefault.OP);
         ensurePermission(pm, "embedize.command.reload", "Reload Embedize", PermissionDefault.OP);
         ensurePermission(pm, "embedize.command.status", "View Embedize status", PermissionDefault.OP);
-        ensurePermission(pm, "embedize.command.install", "Install datapacks", PermissionDefault.OP);
     }
 
     public void registerGroupPermissions(Set<String> groupIds) {

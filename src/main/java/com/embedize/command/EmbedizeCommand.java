@@ -7,7 +7,6 @@ import com.embedize.config.PluginConfig;
 import com.embedize.group.GroupManager;
 import com.embedize.group.StructureGroup;
 import com.embedize.structure.StructureIsolationListener;
-import com.embedize.util.SchedulerUtil;
 import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.format.NamedTextColor;
 import org.bukkit.Bukkit;
@@ -64,13 +63,6 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter {
                     return true;
                 }
                 sendWorldsOverview(sender);
-            }
-            case "install" -> {
-                if (!lp.hasAdmin(sender) && !sender.hasPermission("embedize.command.install")) {
-                    deny(sender);
-                    return true;
-                }
-                runInstall(sender);
             }
             case "group" -> handleGroup(sender, label, args);
             case "help" -> sendHelp(sender, label);
@@ -284,25 +276,6 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter {
         }
     }
 
-    private void runInstall(CommandSender sender) {
-        sender.sendMessage(Component.text("Installing datapacks...", NamedTextColor.YELLOW));
-        SchedulerUtil.runAsync(plugin, () -> {
-            try {
-                boolean changed = plugin.getDatapackService().forceReinstall();
-                SchedulerUtil.runGlobal(plugin, () -> sender.sendMessage(Component.text(
-                        changed ? "Datapacks installed/updated. Restart or /minecraft:reload recommended."
-                                : "Datapacks already up to date.",
-                        NamedTextColor.GREEN
-                )));
-            } catch (Exception e) {
-                SchedulerUtil.runGlobal(plugin, () -> sender.sendMessage(Component.text(
-                        "Install failed: " + e.getMessage(), NamedTextColor.RED)));
-                plugin.getLogger().severe("Install failed: " + e.getMessage());
-                e.printStackTrace();
-            }
-        });
-    }
-
     private void sendStatus(CommandSender sender) {
         PluginConfig cfg = plugin.getPluginConfig();
         StructureIsolationListener listener = plugin.getIsolationListener();
@@ -311,8 +284,6 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter {
         sender.sendMessage(Component.text("enabled: " + cfg.isEnabled()
                 + "  manage-ungrouped: " + cfg.isManageUngrouped(), NamedTextColor.GRAY));
         sender.sendMessage(Component.text("groups: " + plugin.getGroupManager().ids(), NamedTextColor.GRAY));
-        sender.sendMessage(Component.text("datapack sources: " + cfg.getDatapackSources().stream()
-                .map(PluginConfig.DatapackSource::id).toList(), NamedTextColor.GRAY));
         sender.sendMessage(Component.text("allowed: " + listener.getAllowedCount()
                 + "  denied: " + listener.getCancelledCount()
                 + "  passed: " + listener.getPassedCount(), NamedTextColor.GRAY));
@@ -345,7 +316,7 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter {
     }
 
     private void sendHelp(CommandSender sender, String label) {
-        sender.sendMessage(Component.text("/" + label + " reload|status|worlds|install|group ...", NamedTextColor.YELLOW));
+        sender.sendMessage(Component.text("/" + label + " reload|status|worlds|group ...", NamedTextColor.YELLOW));
         sendGroupHelp(sender, label);
     }
 
@@ -363,18 +334,14 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter {
     @Override
     public @Nullable List<String> onTabComplete(@NotNull CommandSender sender, @NotNull Command command, @NotNull String alias, @NotNull String[] args) {
         if (args.length == 1) {
-            return filter(args[0], Arrays.asList("reload", "status", "worlds", "install", "group", "help"));
+            return filter(args[0], Arrays.asList("reload", "status", "worlds", "group", "help"));
         }
         if (!args[0].equalsIgnoreCase("group")) {
             return List.of();
         }
         List<String> groupIds = new ArrayList<>(plugin.getGroupManager().ids());
-        List<String> packIds = plugin.getPluginConfig().getDatapackSources().stream()
-                .map(PluginConfig.DatapackSource::id)
-                .collect(Collectors.toCollection(ArrayList::new));
-        if (!packIds.contains("dungeons-and-taverns")) {
-            packIds.add("dungeons-and-taverns");
-        }
+        List<String> packIds = new ArrayList<>(Arrays.asList(
+                "dungeons-and-taverns", "towns-and-towers", "nova_structures", "towns_and_towers"));
 
         if (args.length == 2) {
             List<String> opts = new ArrayList<>(Arrays.asList("list", "create", "delete"));

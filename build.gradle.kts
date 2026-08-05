@@ -18,7 +18,6 @@ repositories {
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.4-R0.1-SNAPSHOT")
-    compileOnly("com.google.code.gson:gson:2.11.0")
     compileOnly("net.luckperms:api:5.5")
 
     testImplementation("org.junit.jupiter:junit-jupiter:5.11.4")

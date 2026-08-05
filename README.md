@@ -2,35 +2,35 @@
 
 Paper / Folia：按分组隔离结构数据包自然生成。原版 `minecraft:` 永不干涉。兼容 LuckPerms。
 
-## 命令（分组）
+结构数据包请自行放入世界的 `datapacks/`，本插件不下载第三方包。
+
+## 命令
 
 ```
 /embedize group list
 /embedize group create <id> [display]
 /embedize group delete <id>
 /embedize group <id> info
-/embedize group <id> add <pack>
-/embedize group <id> remove <pack>
+/embedize group <id> add <pack|namespace>
+/embedize group <id> remove <pack|namespace>
 /embedize group <id> allowlist add <world>
 /embedize group <id> allowlist remove <world>
+/embedize reload|status|worlds
 ```
 
 示例：
 
 ```
 /embedize group create dungeons
-/embedize group dungeons add dungeons-and-taverns
+/embedize group dungeons add nova_structures
 /embedize group dungeons allowlist add resource
 ```
 
-`pack` 优先匹配 `config.yml` 里 `datapacks.sources` 的 id（并带上其 `namespaces`）；未知 id 会当作结构命名空间处理。
-
-内置示例 sources：`dungeons-and-taverns`（`nova_structures`）、`towns-and-towers`（`towns_and_towers`）。
-无 datapack zip 时会回退下载 Fabric/NeoForge jar 并补 `pack.mcmeta`。
+`add` 也可写常见别名（如 `dungeons-and-taverns` → `nova_structures`，`towns-and-towers` → `towns_and_towers`）。
 
 ## 配置
 
-- `plugins/Embedize/config.yml` — sources 等多数据包安装
+- `plugins/Embedize/config.yml` — 总开关、可选 TFG biome bridge
 - `plugins/Embedize/groups.yml` — 分组 packs / namespaces / allowed-worlds
 
 ## LuckPerms

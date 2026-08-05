@@ -2,7 +2,6 @@ package com.embedize.group;
 
 import com.embedize.EmbedizePlugin;
 import com.embedize.compat.LuckPermsHook;
-import com.embedize.config.PluginConfig;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -113,8 +112,8 @@ public final class GroupManager {
         YamlConfiguration yaml = new YamlConfiguration();
         yaml.options().setHeader(List.of(
                 "Embedize structure groups",
-                "Each group has packs (datapack ids), namespaces (for isolation),",
-                "and allowed-worlds (per-group whitelist).",
+                "Place structure datapacks in the world datapacks folder yourself.",
+                "packs = labels; namespaces = isolation keys; allowed-worlds = whitelist.",
                 "Vanilla minecraft: structures are never managed."
         ));
         for (StructureGroup group : groups.values()) {
@@ -176,7 +175,7 @@ public final class GroupManager {
     }
 
     /**
-     * Resolve a pack id to structure namespaces (config sources + builtins).
+     * Resolve a pack id to structure namespaces (builtins + treat token as namespace).
      */
     public List<String> resolvePackNamespaces(String packId) {
         String id = packId == null ? null : packId.trim().toLowerCase(Locale.ROOT);
@@ -184,15 +183,6 @@ public final class GroupManager {
             return List.of();
         }
         Set<String> out = new LinkedHashSet<>();
-        PluginConfig cfg = plugin.getPluginConfig();
-        if (cfg != null) {
-            for (PluginConfig.DatapackSource source : cfg.getDatapackSources()) {
-                if (source.id().equalsIgnoreCase(id)
-                        || (source.modrinthProject() != null && source.modrinthProject().equalsIgnoreCase(id))) {
-                    out.addAll(source.namespaces());
-                }
-            }
-        }
         List<String> builtin = BUILTIN_PACK_NAMESPACES.get(id);
         if (builtin != null) {
             out.addAll(builtin);
@@ -287,37 +277,5 @@ public final class GroupManager {
         List<StructureGroup> out = new ArrayList<>();
         findByNamespace(namespace).ifPresent(out::add);
         return out;
-    }
-
-    /**
-     * Ensure packs listed under {@code datapacks.sources[*].group} exist in groups.yml.
-     */
-    public synchronized void syncConfiguredSources() {
-        PluginConfig cfg = plugin.getPluginConfig();
-        if (cfg == null) {
-            return;
-        }
-        boolean changed = false;
-        for (PluginConfig.DatapackSource source : cfg.getDatapackSources()) {
-            if (!source.enabled() || source.groupId() == null || source.groupId().isBlank()) {
-                continue;
-            }
-            String gid = StructureGroup.normalizeId(source.groupId());
-            if (gid == null) {
-                continue;
-            }
-            if (!groups.containsKey(gid)) {
-                String display = source.id();
-                groups.put(gid, new StructureGroup(gid, display, List.of(), List.of(), List.of("resource")));
-                changed = true;
-            }
-            String result = addPackToGroup(gid, source.id());
-            if ("ok".equals(result)) {
-                changed = true;
-            }
-        }
-        if (changed) {
-            save();
-        }
     }
 }

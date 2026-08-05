@@ -1,6 +1,7 @@
 # Embedize structure groups
-# packs = datapack ids (from config datapacks.sources / commands)
-# namespaces = structure namespaces used for isolation (usually filled when you add a pack)
+# Place structure datapacks in the world datapacks folder yourself.
+# packs = labels (for your own bookkeeping / commands)
+# namespaces = structure namespaces used for isolation
 # allowed-worlds = per-group whitelist
 
 groups:
