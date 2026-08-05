@@ -27,7 +27,10 @@ public final class GroupManager {
 
     private static final Map<String, List<String>> BUILTIN_PACK_NAMESPACES = Map.of(
             "dungeons-and-taverns", List.of("nova_structures"),
-            "dnt", List.of("nova_structures")
+            "dnt", List.of("nova_structures"),
+            "towns-and-towers", List.of("towns_and_towers"),
+            "towns_and_towers", List.of("towns_and_towers"),
+            "t_and_t", List.of("towns_and_towers")
     );
 
     private final EmbedizePlugin plugin;
@@ -284,5 +287,37 @@ public final class GroupManager {
         List<StructureGroup> out = new ArrayList<>();
         findByNamespace(namespace).ifPresent(out::add);
         return out;
+    }
+
+    /**
+     * Ensure packs listed under {@code datapacks.sources[*].group} exist in groups.yml.
+     */
+    public synchronized void syncConfiguredSources() {
+        PluginConfig cfg = plugin.getPluginConfig();
+        if (cfg == null) {
+            return;
+        }
+        boolean changed = false;
+        for (PluginConfig.DatapackSource source : cfg.getDatapackSources()) {
+            if (!source.enabled() || source.groupId() == null || source.groupId().isBlank()) {
+                continue;
+            }
+            String gid = StructureGroup.normalizeId(source.groupId());
+            if (gid == null) {
+                continue;
+            }
+            if (!groups.containsKey(gid)) {
+                String display = source.id();
+                groups.put(gid, new StructureGroup(gid, display, List.of(), List.of(), List.of("resource")));
+                changed = true;
+            }
+            String result = addPackToGroup(gid, source.id());
+            if ("ok".equals(result)) {
+                changed = true;
+            }
+        }
+        if (changed) {
+            save();
+        }
     }
 }

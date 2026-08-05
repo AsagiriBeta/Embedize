@@ -20,6 +20,8 @@ datapacks:
 
   # Multiple structure datapacks can be listed here (Modrinth download / install).
   # Link them to a group id from groups.yml via "group".
+  # prefer-datapack-zip: true prefers .zip; if none match the server version,
+  # Embedize falls back to Fabric/NeoForge .jar and synthesizes pack.mcmeta.
   sources:
     dungeons-and-taverns:
       enabled: true
@@ -29,6 +31,15 @@ datapacks:
       namespaces:
         - nova_structures
       group: dungeons
+
+    towns-and-towers:
+      enabled: true
+      type: modrinth
+      modrinth-project: towns-and-towers
+      prefer-datapack-zip: true
+      namespaces:
+        - towns_and_towers
+      group: towns
 
 multiverse:
   resolve-aliases: true

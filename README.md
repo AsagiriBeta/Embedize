@@ -25,6 +25,9 @@ Paper / Folia：按分组隔离结构数据包自然生成。原版 `minecraft:`
 
 `pack` 优先匹配 `config.yml` 里 `datapacks.sources` 的 id（并带上其 `namespaces`）；未知 id 会当作结构命名空间处理。
 
+内置示例 sources：`dungeons-and-taverns`（`nova_structures`）、`towns-and-towers`（`towns_and_towers`）。
+无 datapack zip 时会回退下载 Fabric/NeoForge jar 并补 `pack.mcmeta`。
+
 ## 配置
 
 - `plugins/Embedize/config.yml` — sources 等多数据包安装

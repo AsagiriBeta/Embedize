@@ -54,4 +54,11 @@ public final class VersionUtil {
         }
         return v;
     }
+
+    /** True when both versions share the same major.minor (e.g. 1.21.4 and 1.21.1). */
+    public static boolean sameMinorFamily(String a, String b) {
+        String[] ap = normalizeVersion(a).split("\\.");
+        String[] bp = normalizeVersion(b).split("\\.");
+        return ap.length >= 2 && bp.length >= 2 && ap[0].equals(bp[0]) && ap[1].equals(bp[1]);
+    }
 }

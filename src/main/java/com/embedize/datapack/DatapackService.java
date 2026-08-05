@@ -137,9 +137,30 @@ public final class DatapackService {
         }
         Files.createDirectories(target);
         unzip(sourceZip, target);
+        ensurePackMcmeta(target, source.id());
         Files.writeString(marker, sourceKey);
         plugin.getLogger().info("Installed datapack '" + source.id() + "' → " + target.getFileName());
         return true;
+    }
+
+    /**
+     * Fabric/NeoForge mod jars often ship worldgen data without a root {@code pack.mcmeta}.
+     * Paper needs one to load the folder as a datapack.
+     */
+    static void ensurePackMcmeta(Path datapackRoot, String packId) throws IOException {
+        Path meta = datapackRoot.resolve("pack.mcmeta");
+        if (Files.isRegularFile(meta)) {
+            return;
+        }
+        String description = "Embedize installed pack: " + packId;
+        String json = "{\n"
+                + "  \"pack\": {\n"
+                + "    \"pack_format\": 48,\n"
+                + "    \"supported_formats\": {\"min_inclusive\": 1, \"max_inclusive\": 1000},\n"
+                + "    \"description\": \"" + description.replace("\"", "'") + "\"\n"
+                + "  }\n"
+                + "}\n";
+        Files.writeString(meta, json);
     }
 
     private void copyResourceTree(String resourceRoot, Path targetDir) throws IOException {

@@ -30,6 +30,8 @@ public final class EmbedizePlugin extends JavaPlugin {
 
         this.groupManager.load();
         this.pluginConfig.reload();
+        this.groupManager.syncConfiguredSources();
+        this.pluginConfig.rebuildIsolationPolicy();
 
         this.datapackService = new DatapackService(this, pluginConfig);
         this.isolationListener = new StructureIsolationListener(this, pluginConfig);
@@ -86,6 +88,8 @@ public final class EmbedizePlugin extends JavaPlugin {
         reloadConfig();
         groupManager.load();
         pluginConfig.reload();
+        groupManager.syncConfiguredSources();
+        pluginConfig.rebuildIsolationPolicy();
         getLogger().info("Configuration reloaded. groups=" + groupManager.ids());
     }
 }

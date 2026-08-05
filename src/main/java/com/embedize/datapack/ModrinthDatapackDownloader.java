@@ -24,6 +24,8 @@ import java.util.Optional;
 
 /**
  * Downloads structure datapacks from Modrinth (third-party; not redistributed in the repo).
+ * Prefers datapack zip files; falls back to Fabric/NeoForge mod jars (unzipped as datapacks)
+ * when no zip exists for the server version (e.g. Towns and Towers on 1.21.4).
  */
 public final class ModrinthDatapackDownloader {
 
@@ -51,7 +53,8 @@ public final class ModrinthDatapackDownloader {
                 Optional<Path> local = stream
                         .filter(p -> {
                             String n = p.getFileName().toString().toLowerCase(Locale.ROOT);
-                            return n.endsWith(".zip") && (n.contains(source.id().toLowerCase(Locale.ROOT))
+                            return (n.endsWith(".zip") || n.endsWith(".jar"))
+                                    && (n.contains(source.id().toLowerCase(Locale.ROOT))
                                     || n.contains(project.toLowerCase(Locale.ROOT).replace(' ', '-')));
                         })
                         .findFirst();
@@ -66,15 +69,17 @@ public final class ModrinthDatapackDownloader {
         plugin.getLogger().info("Resolving " + project + " for MC " + serverVersion + " from Modrinth...");
 
         ModrinthFile chosen = selectVersion(project, serverVersion, source)
-                .orElseThrow(() -> new IOException("No matching datapack on Modrinth for " + project + " / " + serverVersion));
+                .orElseThrow(() -> new IOException("No matching datapack/mod on Modrinth for " + project + " / " + serverVersion));
 
         Path target = cacheDir.resolve(sanitize(chosen.filename()));
         if (Files.isRegularFile(target) && Files.size(target) > 0) {
-            plugin.getLogger().info("Using cached " + source.id() + ": " + target.getFileName());
+            plugin.getLogger().info("Using cached " + source.id() + ": " + target.getFileName()
+                    + (chosen.zip() ? "" : " (mod jar → datapack)"));
             return target;
         }
 
-        plugin.getLogger().info("Downloading " + source.id() + " " + chosen.versionNumber());
+        plugin.getLogger().info("Downloading " + source.id() + " " + chosen.versionNumber()
+                + " (" + chosen.filename() + ")");
         HttpRequest request = HttpRequest.newBuilder(URI.create(chosen.url()))
                 .timeout(Duration.ofMinutes(3))
                 .header("User-Agent", USER_AGENT)
@@ -106,7 +111,8 @@ public final class ModrinthDatapackDownloader {
         }
 
         JsonArray versions = JsonParser.parseString(response.body()).getAsJsonArray();
-        List<ModrinthFile> candidates = new ArrayList<>();
+        List<ScoredFile> scored = new ArrayList<>();
+
         for (JsonElement element : versions) {
             JsonObject version = element.getAsJsonObject();
             String versionNumber = version.get("version_number").getAsString();
@@ -115,23 +121,36 @@ public final class ModrinthDatapackDownloader {
                 continue;
             }
 
+            boolean exactGame = false;
+            boolean familyGame = false;
             JsonArray gameVersions = version.getAsJsonArray("game_versions");
-            boolean matchesGame = false;
             for (JsonElement gv : gameVersions) {
-                if (VersionUtil.versionMatches(serverVersion, gv.getAsString())) {
-                    matchesGame = true;
-                    break;
+                String g = gv.getAsString();
+                if (VersionUtil.versionMatches(serverVersion, g)) {
+                    exactGame = true;
+                }
+                if (VersionUtil.sameMinorFamily(serverVersion, g)) {
+                    familyGame = true;
                 }
             }
-            if (!matchesGame && source.pinnedVersion() == null) {
+            if (!exactGame && !familyGame && source.pinnedVersion() == null) {
                 continue;
             }
-            if (!matchesGame) {
+            if (!exactGame && !familyGame) {
                 continue;
             }
 
+            boolean datapackLoader = false;
+            if (version.has("loaders")) {
+                for (JsonElement loader : version.getAsJsonArray("loaders")) {
+                    if ("datapack".equalsIgnoreCase(loader.getAsString())) {
+                        datapackLoader = true;
+                        break;
+                    }
+                }
+            }
+
             JsonArray files = version.getAsJsonArray("files");
-            ModrinthFile bestFile = null;
             for (JsonElement fileEl : files) {
                 JsonObject file = fileEl.getAsJsonObject();
                 String filename = file.get("filename").getAsString();
@@ -139,27 +158,42 @@ public final class ModrinthDatapackDownloader {
                 boolean primary = file.has("primary") && file.get("primary").getAsBoolean();
                 boolean zip = filename.toLowerCase(Locale.ROOT).endsWith(".zip");
                 boolean jar = filename.toLowerCase(Locale.ROOT).endsWith(".jar");
-                if (source.preferDatapackZip() && jar && !zip) {
+                if (!zip && !jar) {
                     continue;
                 }
+                // When preferring datapack zip: skip jars on first-tier scoring (they get worse rank)
                 ModrinthFile candidate = new ModrinthFile(versionNumber, filename, fileUrl, zip, primary);
-                if (bestFile == null) {
-                    bestFile = candidate;
-                } else if (source.preferDatapackZip() && candidate.zip() && !bestFile.zip()) {
-                    bestFile = candidate;
-                } else if (candidate.primary() && !bestFile.primary()) {
-                    bestFile = candidate;
+                int score = 0;
+                if (exactGame) {
+                    score += 2000;
+                } else if (familyGame) {
+                    score += 400;
                 }
-            }
-            if (bestFile != null) {
-                candidates.add(bestFile);
+                if (zip) {
+                    score += 300;
+                }
+                if (datapackLoader && zip) {
+                    score += 150;
+                }
+                if (primary) {
+                    score += 20;
+                }
+                if (source.preferDatapackZip() && jar && !zip) {
+                    // Still allow jar fallback, but rank below any zip for the same match tier
+                    score -= 200;
+                }
+                scored.add(new ScoredFile(candidate, score, versionNumber));
             }
         }
 
-        return candidates.stream()
+        // Prefer zip when scores tie, but keep exact-version mod jars above
+        // family-only datapack zips (e.g. TaT 1.21.4 jar vs 1.21.11 zip).
+
+        return scored.stream()
                 .sorted(Comparator
-                        .comparing((ModrinthFile f) -> !f.zip())
-                        .thenComparing(ModrinthFile::versionNumber, Comparator.reverseOrder()))
+                        .comparingInt(ScoredFile::score).reversed()
+                        .thenComparing(ScoredFile::versionNumber, Comparator.reverseOrder()))
+                .map(ScoredFile::file)
                 .findFirst();
     }
 
@@ -181,5 +215,8 @@ public final class ModrinthDatapackDownloader {
     }
 
     private record ModrinthFile(String versionNumber, String filename, String url, boolean zip, boolean primary) {
+    }
+
+    private record ScoredFile(ModrinthFile file, int score, String versionNumber) {
     }
 }

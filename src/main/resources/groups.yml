@@ -12,3 +12,12 @@ groups:
       - nova_structures
     allowed-worlds:
       - resource
+
+  towns:
+    display-name: Towns and Towers
+    packs:
+      - towns-and-towers
+    namespaces:
+      - towns_and_towers
+    allowed-worlds:
+      - resource

@@ -20,4 +20,11 @@ class VersionUtilTest {
         Assertions.assertTrue(VersionUtil.versionMatches("1.21.11", "1.21.11"));
         Assertions.assertFalse(VersionUtil.versionMatches("26.1.2", "26.2"));
     }
+
+    @Test
+    void sameMinorFamily() {
+        Assertions.assertTrue(VersionUtil.sameMinorFamily("1.21.4", "1.21.1"));
+        Assertions.assertTrue(VersionUtil.sameMinorFamily("1.21.4", "1.21.11"));
+        Assertions.assertFalse(VersionUtil.sameMinorFamily("1.21.4", "1.20.6"));
+    }
 }
