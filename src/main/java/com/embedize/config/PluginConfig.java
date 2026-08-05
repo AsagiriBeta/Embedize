@@ -24,7 +24,8 @@ public final class PluginConfig {
             String modrinthProject,
             boolean preferDatapackZip,
             String pinnedVersion,
-            String groupId
+            String groupId,
+            List<String> namespaces
     ) {
     }
 
@@ -129,7 +130,8 @@ public final class PluginConfig {
                         dnt == null ? "dungeons-and-taverns" : dnt.getString("modrinth-project", "dungeons-and-taverns"),
                         dnt == null || dnt.getBoolean("prefer-datapack-zip", true),
                         blankToNull(dnt == null ? null : dnt.getString("pinned-version")),
-                        "default"
+                        "dungeons",
+                        List.of("nova_structures")
                 ));
             }
         }
@@ -137,6 +139,10 @@ public final class PluginConfig {
     }
 
     private static DatapackSource fromSection(ConfigurationSection sec, String fallbackId) {
+        List<String> namespaces = sec.getStringList("namespaces");
+        if (namespaces.isEmpty() && "dungeons-and-taverns".equalsIgnoreCase(sec.getString("id", fallbackId))) {
+            namespaces = List.of("nova_structures");
+        }
         return new DatapackSource(
                 sec.getString("id", fallbackId),
                 sec.getBoolean("enabled", true),
@@ -144,7 +150,8 @@ public final class PluginConfig {
                 sec.getString("modrinth-project", sec.getString("id", fallbackId)),
                 sec.getBoolean("prefer-datapack-zip", true),
                 blankToNull(sec.getString("pinned-version")),
-                blankToNull(sec.getString("group"))
+                blankToNull(sec.getString("group")),
+                List.copyOf(namespaces)
         );
     }
 
@@ -156,6 +163,18 @@ public final class PluginConfig {
             }
         }
         String id = String.valueOf(m.getOrDefault("id", fallbackId));
+        List<String> namespaces = new ArrayList<>();
+        Object nsObj = m.get("namespaces");
+        if (nsObj instanceof List<?> list) {
+            for (Object o : list) {
+                if (o != null) {
+                    namespaces.add(String.valueOf(o));
+                }
+            }
+        }
+        if (namespaces.isEmpty() && "dungeons-and-taverns".equalsIgnoreCase(id)) {
+            namespaces = List.of("nova_structures");
+        }
         return new DatapackSource(
                 id,
                 asBool(m.get("enabled"), true),
@@ -163,7 +182,8 @@ public final class PluginConfig {
                 String.valueOf(m.getOrDefault("modrinth-project", id)),
                 asBool(m.get("prefer-datapack-zip"), true),
                 blankToNull(m.get("pinned-version") == null ? null : String.valueOf(m.get("pinned-version"))),
-                blankToNull(m.get("group") == null ? null : String.valueOf(m.get("group")))
+                blankToNull(m.get("group") == null ? null : String.valueOf(m.get("group"))),
+                List.copyOf(namespaces)
         );
     }
 

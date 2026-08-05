@@ -2,6 +2,7 @@ package com.embedize.group;
 
 import com.embedize.EmbedizePlugin;
 import com.embedize.compat.LuckPermsHook;
+import com.embedize.config.PluginConfig;
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -12,6 +13,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -22,6 +24,11 @@ import java.util.Set;
  * Persists datapack structure groups to {@code groups.yml}.
  */
 public final class GroupManager {
+
+    private static final Map<String, List<String>> BUILTIN_PACK_NAMESPACES = Map.of(
+            "dungeons-and-taverns", List.of("nova_structures"),
+            "dnt", List.of("nova_structures")
+    );
 
     private final EmbedizePlugin plugin;
     private final File file;
@@ -57,10 +64,14 @@ public final class GroupManager {
                     continue;
                 }
                 String display = sec.getString("display-name", id);
+                List<String> packs = sec.getStringList("packs");
+                if (packs.isEmpty()) {
+                    packs = sec.getStringList("datapacks");
+                }
                 List<String> namespaces = sec.getStringList("namespaces");
                 List<String> worlds = sec.getStringList("allowed-worlds");
                 try {
-                    StructureGroup group = new StructureGroup(id, display, namespaces, worlds);
+                    StructureGroup group = new StructureGroup(id, display, packs, namespaces, worlds);
                     groups.put(group.getId(), group);
                 } catch (IllegalArgumentException ex) {
                     plugin.getLogger().warning("Skipping invalid group '" + id + "': " + ex.getMessage());
@@ -85,26 +96,28 @@ public final class GroupManager {
             worlds = List.of("resource");
         }
         StructureGroup migrated = new StructureGroup(
-                "default",
-                "Default",
+                "dungeons",
+                "Dungeons and Taverns",
+                List.of("dungeons-and-taverns"),
                 namespaces,
                 worlds
         );
         groups.put(migrated.getId(), migrated);
-        plugin.getLogger().info("Created groups.yml with migrated group 'default'.");
+        plugin.getLogger().info("Created groups.yml with migrated group 'dungeons'.");
     }
 
     public synchronized void save() {
         YamlConfiguration yaml = new YamlConfiguration();
         yaml.options().setHeader(List.of(
                 "Embedize structure groups",
-                "Each group has its own namespaces (datapack structure namespaces)",
-                "and its own allowed-worlds whitelist.",
+                "Each group has packs (datapack ids), namespaces (for isolation),",
+                "and allowed-worlds (per-group whitelist).",
                 "Vanilla minecraft: structures are never managed."
         ));
         for (StructureGroup group : groups.values()) {
             String path = "groups." + group.getId();
             yaml.set(path + ".display-name", group.getDisplayName());
+            yaml.set(path + ".packs", group.packList());
             yaml.set(path + ".namespaces", group.namespaceList());
             yaml.set(path + ".allowed-worlds", group.worldList());
         }
@@ -144,7 +157,7 @@ public final class GroupManager {
         if (nid == null || groups.containsKey(nid)) {
             return false;
         }
-        groups.put(nid, new StructureGroup(nid, displayName, List.of(), List.of()));
+        groups.put(nid, new StructureGroup(nid, displayName, List.of(), List.of(), List.of()));
         save();
         return true;
     }
@@ -160,8 +173,97 @@ public final class GroupManager {
     }
 
     /**
-     * Find the first group that owns this structure namespace (non-vanilla).
+     * Resolve a pack id to structure namespaces (config sources + builtins).
      */
+    public List<String> resolvePackNamespaces(String packId) {
+        String id = packId == null ? null : packId.trim().toLowerCase(Locale.ROOT);
+        if (id == null || id.isBlank()) {
+            return List.of();
+        }
+        Set<String> out = new LinkedHashSet<>();
+        PluginConfig cfg = plugin.getPluginConfig();
+        if (cfg != null) {
+            for (PluginConfig.DatapackSource source : cfg.getDatapackSources()) {
+                if (source.id().equalsIgnoreCase(id)
+                        || (source.modrinthProject() != null && source.modrinthProject().equalsIgnoreCase(id))) {
+                    out.addAll(source.namespaces());
+                }
+            }
+        }
+        List<String> builtin = BUILTIN_PACK_NAMESPACES.get(id);
+        if (builtin != null) {
+            out.addAll(builtin);
+        }
+        // If still empty, treat the token itself as a namespace (except minecraft)
+        if (out.isEmpty() && !"minecraft".equals(id)) {
+            out.add(id);
+        }
+        out.remove("minecraft");
+        return new ArrayList<>(out);
+    }
+
+    /**
+     * Add a datapack to a group (records pack id + resolved namespaces).
+     */
+    public synchronized String addPackToGroup(String groupId, String packId) {
+        Optional<StructureGroup> opt = get(groupId);
+        if (opt.isEmpty()) {
+            return "not-found";
+        }
+        StructureGroup group = opt.get();
+        String pack = packId.trim().toLowerCase(Locale.ROOT);
+        if ("minecraft".equals(pack)) {
+            return "vanilla";
+        }
+        List<String> namespaces = resolvePackNamespaces(pack);
+        for (String ns : namespaces) {
+            Optional<StructureGroup> owner = findByNamespace(ns);
+            if (owner.isPresent() && !owner.get().getId().equals(group.getId())) {
+                return "ns-taken:" + owner.get().getId() + ":" + ns;
+            }
+        }
+        boolean changed = group.addPack(pack);
+        for (String ns : namespaces) {
+            changed |= group.addNamespace(ns);
+        }
+        if (changed) {
+            save();
+        }
+        return changed ? "ok" : "noop";
+    }
+
+    public synchronized String removePackFromGroup(String groupId, String packId) {
+        Optional<StructureGroup> opt = get(groupId);
+        if (opt.isEmpty()) {
+            return "not-found";
+        }
+        StructureGroup group = opt.get();
+        String pack = packId.trim().toLowerCase(Locale.ROOT);
+        List<String> namespaces = resolvePackNamespaces(pack);
+        boolean changed = group.removePack(pack);
+        for (String ns : namespaces) {
+            // Only remove namespace if no remaining pack in this group still needs it
+            boolean stillNeeded = false;
+            for (String remaining : group.getPacks()) {
+                if (resolvePackNamespaces(remaining).contains(ns)) {
+                    stillNeeded = true;
+                    break;
+                }
+            }
+            if (!stillNeeded) {
+                changed |= group.removeNamespace(ns);
+            }
+        }
+        // Also allow remove by bare namespace
+        if (group.getNamespaces().contains(pack)) {
+            changed |= group.removeNamespace(pack);
+        }
+        if (changed) {
+            save();
+        }
+        return changed ? "ok" : "noop";
+    }
+
     public synchronized Optional<StructureGroup> findByNamespace(String namespace) {
         if (namespace == null || namespace.isBlank()) {
             return Optional.empty();
@@ -180,18 +282,7 @@ public final class GroupManager {
 
     public synchronized List<StructureGroup> findAllByNamespace(String namespace) {
         List<StructureGroup> out = new ArrayList<>();
-        if (namespace == null || namespace.isBlank()) {
-            return out;
-        }
-        String ns = namespace.trim().toLowerCase(Locale.ROOT);
-        if ("minecraft".equals(ns)) {
-            return out;
-        }
-        for (StructureGroup group : groups.values()) {
-            if (group.ownsNamespace(ns)) {
-                out.add(group);
-            }
-        }
+        findByNamespace(namespace).ifPresent(out::add);
         return out;
     }
 }

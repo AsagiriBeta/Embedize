@@ -11,20 +11,29 @@ import java.util.Set;
 
 /**
  * A named datapack structure group with its own world whitelist.
+ * {@code packs} are user-facing datapack ids; {@code namespaces} drive isolation.
  */
 public final class StructureGroup {
 
     private final String id;
     private String displayName;
+    private final Set<String> packs;
     private final Set<String> namespaces;
     private final Set<String> allowedWorlds;
 
-    public StructureGroup(String id, String displayName, Collection<String> namespaces, Collection<String> allowedWorlds) {
+    public StructureGroup(
+            String id,
+            String displayName,
+            Collection<String> packs,
+            Collection<String> namespaces,
+            Collection<String> allowedWorlds
+    ) {
         this.id = normalizeId(id);
         if (this.id == null) {
             throw new IllegalArgumentException("Invalid group id");
         }
         this.displayName = displayName == null || displayName.isBlank() ? this.id : displayName.trim();
+        this.packs = new LinkedHashSet<>(normalizeAll(packs));
         this.namespaces = new LinkedHashSet<>(normalizeAll(namespaces));
         this.namespaces.remove("minecraft");
         this.allowedWorlds = new LinkedHashSet<>(normalizeAll(allowedWorlds));
@@ -44,12 +53,31 @@ public final class StructureGroup {
         }
     }
 
+    public Set<String> getPacks() {
+        return Collections.unmodifiableSet(packs);
+    }
+
     public Set<String> getNamespaces() {
         return Collections.unmodifiableSet(namespaces);
     }
 
     public Set<String> getAllowedWorlds() {
         return Collections.unmodifiableSet(allowedWorlds);
+    }
+
+    public boolean addPack(String packId) {
+        String p = normalizeOne(packId);
+        return p != null && packs.add(p);
+    }
+
+    public boolean removePack(String packId) {
+        String p = normalizeOne(packId);
+        return p != null && packs.remove(p);
+    }
+
+    public boolean hasPack(String packId) {
+        String p = normalizeOne(packId);
+        return p != null && packs.contains(p);
     }
 
     public boolean addNamespace(String namespace) {
@@ -85,6 +113,10 @@ public final class StructureGroup {
         return ns != null && namespaces.contains(ns);
     }
 
+    public List<String> packList() {
+        return new ArrayList<>(packs);
+    }
+
     public List<String> namespaceList() {
         return new ArrayList<>(namespaces);
     }
@@ -98,7 +130,6 @@ public final class StructureGroup {
         if (n == null) {
             return null;
         }
-        // ids: lowercase letters, digits, dash, underscore
         if (!n.matches("[a-z0-9][a-z0-9_\\-]*")) {
             return null;
         }

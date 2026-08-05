@@ -26,6 +26,8 @@ datapacks:
       type: modrinth
       modrinth-project: dungeons-and-taverns
       prefer-datapack-zip: true
+      namespaces:
+        - nova_structures
       group: dungeons
 
 multiverse:

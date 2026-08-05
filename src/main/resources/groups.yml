@@ -1,10 +1,13 @@
 # Embedize structure groups
-# Each group owns structure namespaces and has an independent world whitelist.
-# Edit via /embedize group ... or by hand, then /embedize reload
+# packs = datapack ids (from config datapacks.sources / commands)
+# namespaces = structure namespaces used for isolation (usually filled when you add a pack)
+# allowed-worlds = per-group whitelist
 
 groups:
   dungeons:
     display-name: Dungeons and Taverns
+    packs:
+      - dungeons-and-taverns
     namespaces:
       - nova_structures
     allowed-worlds:
