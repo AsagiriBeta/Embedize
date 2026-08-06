@@ -1,0 +1,27 @@
+# Embedize invisible world borders
+# Not the vanilla blue border — players outside are knocked back by the plugin.
+# Borders are keyed by world NAME, so deleting/recreating a world (e.g. resource)
+# with the same name keeps the border in effect.
+
+enabled: true
+
+# Default shape: square | round
+shape: square
+
+# How far inside the edge to place knocked-back players
+knockback: 3.0
+
+# How often (in ticks) to scan online players (20 ticks = 1 second)
+timer-ticks: 5
+
+# Sent when a player is knocked back (& color codes supported)
+message: "&cYou reached the world border."
+
+# Per-world borders (world may not be loaded yet — still applied when it appears)
+worlds: {}
+#  resource:
+#    x: 0.5
+#    z: 0.5
+#    radius-x: 5000
+#    radius-z: 5000
+#    shape: square
