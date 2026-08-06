@@ -1,16 +1,72 @@
+# --- Gradle ---
 .gradle/
 build/
-out/
+!gradle/wrapper/gradle-wrapper.jar
+
+# --- Java / Kotlin ---
+*.class
+*.jar
+!gradle/wrapper/gradle-wrapper.jar
+*.war
+*.ear
+*.nar
+hs_err_pid*
+replay_pid*
+
+# --- IDE ---
 .idea/
 *.iml
 *.ipr
 *.iws
+.vscode/
+*.code-workspace
 .classpath
 .project
 .settings/
+.factorypath
 bin/
-run/
-*.log
+out/
+*.swp
+*.swo
+*~
+
+# --- OS ---
 .DS_Store
-plugins/Embedize/cache/
+.DS_Store?
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# --- Logs / temp ---
+*.log
+*.tmp
+*.temp
+*.bak
+*.orig
+*.pid
+logs/
+
+# --- Local Minecraft / Paper test servers ---
 test-server/
+run/
+paper/
+server/
+servers/
+
+# --- Local plugin runtime data (if ever created in-repo) ---
+plugins/
+!src/**/plugins/
+plugins/Embedize/
+plugins/Embedize/cache/
+
+# --- Secrets / local overrides ---
+*.env
+.env.*
+!.env.example
+local.properties
+secrets/
+
+# --- Cursor / agent artifacts ---
+.cursor/
+*.mp4
+artifacts/
