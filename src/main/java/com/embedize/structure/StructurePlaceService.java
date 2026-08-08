@@ -139,7 +139,7 @@ public final class StructurePlaceService {
                 if (carved > 0) {
                     feedback.sendMessage(Component.text(
                             "Place-only soft ellipsoid carve: " + carved + " terrain → cave_air "
-                                    + "(beard_box stand-in; natural gen uses per-piece soft beard)",
+                                    + "(beard_box stand-in; natural soft-beard is off by default)",
                             NamedTextColor.AQUA));
                 }
             }
@@ -273,7 +273,7 @@ public final class StructurePlaceService {
                         + "soft-ellipsoid carve when structures.place-hollow-carve=true (default).",
                 NamedTextColor.GRAY));
         sender.sendMessage(Component.text(
-                "Natural gen uses per-piece soft beard for streets. Stronghold = encapsulate (no carve).",
+                "Natural soft-beard defaults off (watchdog-safe). Stronghold = encapsulate (no carve).",
                 NamedTextColor.GRAY));
         sender.sendMessage(Component.text(
                 "Surface place uses surface-ignore-air (config): template air does not dig terrain.",

@@ -9,9 +9,12 @@ import com.embedize.compat.MultiverseHook;
 import com.embedize.compat.PlaceholderApiHook;
 import com.embedize.reset.ResourceWorldResetListener;
 import com.embedize.reset.ResourceWorldResetService;
+import com.embedize.structure.BundledDatapackSync;
 import com.embedize.structure.StructureAirPolicy;
 import com.embedize.structure.StructureAirSkipListener;
 import com.embedize.structure.StructureCatalog;
+import com.embedize.structure.StructureWorldGate;
+import com.embedize.structure.StructureWorldGateListener;
 import com.embedize.terrain.TerrainGeneratorFactory;
 import com.embedize.terrain.TerrainWorldListener;
 import org.bukkit.generator.ChunkGenerator;
@@ -31,6 +34,7 @@ public final class EmbedizePlugin extends JavaPlugin {
     private MultiverseHook multiverseHook;
     private PlaceholderApiHook placeholderApiHook;
     private StructureCatalog structureCatalog;
+    private BundledDatapackSync bundledDatapackSync;
     private TerrainWorldListener terrainWorldListener;
     private ResourceWorldResetService resourceWorldResetService;
 
@@ -38,6 +42,7 @@ public final class EmbedizePlugin extends JavaPlugin {
     public void onEnable() {
         saveDefaultConfig();
         StructureAirPolicy.reload(getConfig());
+        com.embedize.structure.nms.StructurePlacementBridge.reloadDebug(getConfig());
 
         this.luckPermsHook = new LuckPermsHook(this);
         this.luckPermsHook.registerBasePermissions();
@@ -48,6 +53,13 @@ public final class EmbedizePlugin extends JavaPlugin {
         this.multiverseHook = new MultiverseHook(this);
         this.structureCatalog = new StructureCatalog(this);
 
+        // Before Multiverse (load: AFTER) brings Embedize worlds online: enable
+        // bundled packs when config/MV expects them. Default world already loaded
+        // with packs lazy-disabled at discovery when possible.
+        this.bundledDatapackSync = new BundledDatapackSync(this);
+        getServer().getPluginManager().registerEvents(bundledDatapackSync, this);
+        bundledDatapackSync.syncNow("onEnable");
+
         this.resourceWorldResetService = new ResourceWorldResetService(this);
         this.resourceWorldResetService.start();
         this.placeholderApiHook = new PlaceholderApiHook(this);
@@ -56,6 +68,8 @@ public final class EmbedizePlugin extends JavaPlugin {
         getServer().getPluginManager().registerEvents(
                 new ResourceWorldResetListener(resourceWorldResetService), this);
         getServer().getPluginManager().registerEvents(new StructureAirSkipListener(this), this);
+        getServer().getPluginManager().registerEvents(
+                new StructureWorldGateListener(new StructureWorldGate(structureCatalog)), this);
         this.terrainWorldListener = new TerrainWorldListener(this);
         getServer().getPluginManager().registerEvents(terrainWorldListener, this);
         // Bind NMS placeInChunk bridge with plugin logger before attaching populators.
@@ -91,7 +105,11 @@ public final class EmbedizePlugin extends JavaPlugin {
                 + " | gens=Embedize|Embedize:nether|Embedize:end"
                 + " | structures=" + structureCatalog.structureCount()
                 + " nbt≈" + structureCatalog.nbtCount()
+                + " | structure-gate=catalog+custom-ns"
+                + " | bundled-packs=" + (bundledDatapackSync.lastDesiredEnable() ? "enable" : "disable")
                 + " | surface-ignore-air=" + StructureAirPolicy.get().surfaceIgnoreAirEnabled()
+                + " | density-adapt=" + StructureAirPolicy.get().densityAdaptEnabled()
+                + " | soft-beard=" + StructureAirPolicy.get().softBeardEnabled()
                 + " | vanilla starts + placeInChunk bridge | GPLv3");
     }
 
@@ -124,7 +142,11 @@ public final class EmbedizePlugin extends JavaPlugin {
     public void reloadPlugin() {
         reloadConfig();
         StructureAirPolicy.reload(getConfig());
+        com.embedize.structure.nms.StructurePlacementBridge.reloadDebug(getConfig());
         borderManager.load();
+        if (bundledDatapackSync != null) {
+            bundledDatapackSync.syncNow("reload");
+        }
         if (resourceWorldResetService != null) {
             resourceWorldResetService.reload();
         }
@@ -136,6 +158,10 @@ public final class EmbedizePlugin extends JavaPlugin {
 
     public StructureCatalog getStructureCatalog() {
         return structureCatalog;
+    }
+
+    public BundledDatapackSync getBundledDatapackSync() {
+        return bundledDatapackSync;
     }
 
     public LuckPermsHook getLuckPermsHook() {

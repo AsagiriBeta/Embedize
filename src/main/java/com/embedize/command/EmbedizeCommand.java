@@ -254,6 +254,16 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter, Bas
                         + " / Nether " + catalog.forWorld(World.Environment.NETHER).size()
                         + " / End " + catalog.forWorld(World.Environment.THE_END).size() + ")",
                 NamedTextColor.DARK_AQUA));
+        var sync = plugin.getBundledDatapackSync();
+        if (sync != null) {
+            sender.sendMessage(Component.text(
+                    "bundled-pack-mode desired=" + (sync.lastDesiredEnable() ? "enabled" : "disabled")
+                            + " (Paper global; gate=catalog+custom-ns)",
+                    NamedTextColor.YELLOW));
+            for (String line : sync.managedPackStatuses()) {
+                sender.sendMessage(Component.text("  " + line, NamedTextColor.DARK_GRAY));
+            }
+        }
     }
 
     private void sendGenerators(CommandSender sender) {
@@ -293,8 +303,15 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter, Bas
                         + " nbt≈" + catalog.nbtCount()
                         + " tags=" + catalog.tagCount()
                         + " packs=" + catalog.packNames().size()
-                        + " | engine=vanilla (shouldGenerateStructures)",
+                        + " | engine=vanilla | natural-spawn=Embedize-worlds-only",
                 NamedTextColor.AQUA));
+        var sync = plugin.getBundledDatapackSync();
+        if (sync != null) {
+            sender.sendMessage(Component.text(
+                    "bundled packs: desired=" + (sync.lastDesiredEnable() ? "on" : "off")
+                            + " | gate=catalog+custom-ns (Paper=global registry)",
+                    NamedTextColor.YELLOW));
+        }
         sender.sendMessage(Component.text("borders: " + plugin.getBorderManager().worldNames(), NamedTextColor.GRAY));
         ResourceWorldResetService reset = plugin.getResourceWorldResetService();
         if (reset != null) {
@@ -322,12 +339,14 @@ public final class EmbedizeCommand implements CommandExecutor, TabCompleter, Bas
         for (World world : Bukkit.getWorlds()) {
             String gen = world.getGenerator() == null ? "vanilla" : world.getGenerator().getClass().getSimpleName();
             int structs = catalog.forWorld(world.getEnvironment()).size();
-            boolean vanillaStructures = world.getGenerator() instanceof com.embedize.terrain.EmbedizeGenerator;
+            boolean embedizeStructures = world.getGenerator() instanceof com.embedize.terrain.EmbedizeGenerator;
             sender.sendMessage(Component.text(
                     " - " + world.getName() + " env=" + world.getEnvironment()
                             + " gen=" + gen
                             + " catalog=" + structs
-                            + (vanillaStructures ? " structures=vanilla-engine" : ""),
+                            + (embedizeStructures
+                            ? " structures=vanilla-engine"
+                            : " structures=gated-off"),
                     NamedTextColor.GRAY));
         }
     }

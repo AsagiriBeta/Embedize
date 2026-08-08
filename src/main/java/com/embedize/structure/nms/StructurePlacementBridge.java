@@ -4,6 +4,7 @@ import com.embedize.structure.SoftBeardAdaptation;
 import com.embedize.structure.StructureAirPolicy;
 import org.bukkit.Material;
 import org.bukkit.World;
+import org.bukkit.configuration.file.FileConfiguration;
 import org.bukkit.generator.LimitedRegion;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
@@ -15,6 +16,7 @@ import java.lang.reflect.Method;
 import java.lang.reflect.Proxy;
 import java.util.Collection;
 import java.util.EnumSet;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -42,9 +44,18 @@ import java.util.logging.Logger;
  * {@code Beardifier} (density subtraction per <em>piece</em> box). With
  * {@code shouldGenerateNoise=false}, that pass never runs — building interiors still
  * clear via template AIR, but streets/plazas between pieces stay solid. Natural gen
- * therefore applies {@link SoftBeardAdaptation} per piece box before
- * {@code placeInChunk} (never the StructureStart AABB hull). Manual
- * {@code /embedize place} uses a soft ellipsoid via {@link #preCarveForPlace}.
+ * approximates Beardifier <em>before</em> {@code placeInChunk}:
+ * <ul>
+ *   <li>{@code structures.density-adapt=true} (default) — column-wise density falloff
+ *       via {@link SoftBeardAdaptation} on the current chunk only.</li>
+ *   <li>{@code structures.soft-beard=true} (default false) — heavier per-voxel carve;
+ *       used only when density-adapt is off.</li>
+ * </ul>
+ * Both paths write only through {@code WorldGenLevel} for the current populate chunk
+ * AABB — never {@code CraftBlock.getType} / {@code Level.getChunk} syncLoad (that
+ * deadlocked Leaves/Paper features workers against the Server thread). Do not expand
+ * scans into neighbour columns. Manual {@code /embedize place} uses a soft ellipsoid
+ * via {@link #preCarveForPlace} (main thread / forceload — separate from natural gen).
  * <p>
  * {@code encapsulate} (stronghold) must never be hollow-carved — it solidifies the exterior.
  * <p>
@@ -64,6 +75,9 @@ public final class StructurePlacementBridge {
     private static final AtomicBoolean INIT = new AtomicBoolean(false);
     private static final AtomicBoolean AVAILABLE = new AtomicBoolean(false);
 
+    /** When false (default), per-chunk placeInChunk / density-adapt / soft-beard INFO logs are suppressed. */
+    private static volatile boolean debug = false;
+
     /** Terrain materials replaced when simulating beard_box before /place. */
     private static final Set<Material> CARVABLE_TERRAIN = EnumSet.of(
             Material.STONE, Material.DEEPSLATE, Material.TUFF, Material.GRANITE, Material.DIORITE,
@@ -82,6 +96,13 @@ public final class StructurePlacementBridge {
     private static Method worldGenLevelGetChunk;
     private static Method worldGenLevelGetSeed;
     private static Method worldGenLevelGetLevel;
+    private static Method worldGenLevelGetBlockState;
+    private static Method worldGenLevelSetBlock;
+    private static Method blockStateGetBlock;
+    private static Constructor<?> blockPosCtor;
+    private static Object caveAirBlockState;
+    /** NMS {@code Block} instances matching {@link #CARVABLE_TERRAIN}; empty if unbound. */
+    private static Set<Object> carvableNmsBlocks = Set.of();
     private static Method chunkAccessGetPos;
     private static Method chunkAccessGetMinY;
     private static Method chunkAccessGetMaxY;
@@ -135,6 +156,19 @@ public final class StructurePlacementBridge {
     public static boolean available() {
         ensureInit(null);
         return AVAILABLE.get();
+    }
+
+    /**
+     * Reload global {@code debug} from config (default {@code false}).
+     * Gates high-volume structure-bridge INFO lines only; WARN/SEVERE and one-shot
+     * startup readiness stay visible.
+     */
+    public static void reloadDebug(@Nullable FileConfiguration config) {
+        debug = config != null && config.getBoolean("debug", false);
+    }
+
+    public static boolean isDebug() {
+        return debug;
     }
 
     /** Force (re)bind and log diagnostics to {@code logger}. */
@@ -545,7 +579,7 @@ public final class StructurePlacementBridge {
                         boundingBox, chunkPos, logger);
             }
         }
-        if (placed > 0 && logger != null) {
+        if (placed > 0 && logger != null && debug) {
             logger.info("[structure-bridge] placeInChunk x" + placed
                     + " at chunk " + (minX >> 4) + "," + (minZ >> 4));
         }
@@ -577,9 +611,18 @@ public final class StructurePlacementBridge {
 
         String structureId = resolveStructureId(structure, worldGenLevel);
         World bukkitWorld = bukkitWorldOf(worldGenLevel);
-        // Soft per-piece beard stand-in for streets/plazas. Template AIR still owns interiors.
-        if (bukkitWorld != null && needsSoftBeardAdaptation(bukkitWorld, structure, structureId)) {
-            softAdaptBeardPieces(bukkitWorld, pieces, boundingBox, structureId, logger);
+        // Beard_box street clearance before placeInChunk. Prefer density-adapt (default);
+        // soft-beard only when density-adapt is off — never both (duplicate heavy work).
+        // ASYNC SAFETY: WorldGenLevel getBlockState/setBlock on current-chunk coords only.
+        // FORBIDDEN on this worker path: CraftBlock.getType, World#getBlockAt, syncLoad,
+        // forceload neighbour chunks.
+        if (needsSoftBeardAdaptation(bukkitWorld, structure, structureId)) {
+            StructureAirPolicy policy = StructureAirPolicy.get();
+            if (policy.densityAdaptEnabled()) {
+                densityAdaptBeardColumns(worldGenLevel, pieces, boundingBox, structureId, logger);
+            } else if (policy.softBeardEnabled()) {
+                softAdaptBeardPieces(worldGenLevel, pieces, boundingBox, structureId, logger);
+            }
         }
 
         Object placeLevel = worldGenLevel;
@@ -603,7 +646,7 @@ public final class StructurePlacementBridge {
      * {@code *:ancient_city} overrides that keep the adaptation.
      */
     private static boolean needsSoftBeardAdaptation(
-            @NotNull World world,
+            @Nullable World world,
             @Nullable Object structure,
             @Nullable String structureId
     ) {
@@ -623,7 +666,7 @@ public final class StructurePlacementBridge {
         } catch (ReflectiveOperationException ignored) {
             // fall through
         }
-        if (structureId == null || structureId.isBlank()) {
+        if (world == null || structureId == null || structureId.isBlank()) {
             return false;
         }
         StructureMeta meta = lookupStructureMeta(world, structureId);
@@ -631,17 +674,23 @@ public final class StructurePlacementBridge {
     }
 
     /**
-     * Per-piece soft cave_air carve intersecting this chunk. Opens beard_box street
-     * volumes without excavating the StructureStart rectangular hull.
+     * Column-wise density clearance for beard_box / ancient_city (default path).
+     * Closer to Beardifier density falloff than a full voxel soft carve: skips
+     * columns outside the piece XZ influence, then clears Y with a density threshold.
+     * <p>
+     * <strong>Watchdog-critical / async-safe:</strong> only {@code WorldGenLevel}
+     * get/set on coordinates clamped to the current populate chunk AABB.
+     * Never Bukkit {@code getType}/{@code getBlockAt} (CraftBlock → syncLoad deadlock).
+     * Never expand into neighbour columns (no O(piece×kernel³) cross-chunk access).
      */
-    private static int softAdaptBeardPieces(
-            @NotNull World world,
+    private static int densityAdaptBeardColumns(
+            @NotNull Object worldGenLevel,
             @NotNull Collection<?> pieces,
             @NotNull Object chunkBoundingBox,
             @Nullable String structureId,
             @Nullable Logger logger
     ) throws ReflectiveOperationException {
-        if (structurePieceGetBoundingBox == null) {
+        if (!beardCarveBound()) {
             return 0;
         }
         int chunkMinX = (Integer) boundingBoxMinX.invoke(chunkBoundingBox);
@@ -666,10 +715,11 @@ public final class StructurePlacementBridge {
             int maxX = (Integer) boundingBoxMaxX.invoke(pieceBox);
             int maxY = (Integer) boundingBoxMaxY.invoke(pieceBox);
             int maxZ = (Integer) boundingBoxMaxZ.invoke(pieceBox);
+            // Strictly current-chunk AABB — never expand into neighbour columns.
             int scanMinX = Math.max(chunkMinX, minX - kernel);
             int scanMaxX = Math.min(chunkMaxX, maxX + kernel);
-            int scanMinY = Math.max(chunkMinY, Math.max(world.getMinHeight(), minY - kernel));
-            int scanMaxY = Math.min(chunkMaxY, Math.min(world.getMaxHeight() - 1, maxY + kernel));
+            int scanMinY = Math.max(chunkMinY, minY - kernel);
+            int scanMaxY = Math.min(chunkMaxY, maxY + kernel);
             int scanMinZ = Math.max(chunkMinZ, minZ - kernel);
             int scanMaxZ = Math.min(chunkMaxZ, maxZ + kernel);
             if (scanMinX > scanMaxX || scanMinY > scanMaxY || scanMinZ > scanMaxZ) {
@@ -677,26 +727,138 @@ public final class StructurePlacementBridge {
             }
             for (int x = scanMinX; x <= scanMaxX; x++) {
                 for (int z = scanMinZ; z <= scanMaxZ; z++) {
+                    if (!SoftBeardAdaptation.influencesColumn(
+                            x, z, minX, minZ, maxX, maxZ, kernel)) {
+                        continue;
+                    }
+                    for (int y = scanMinY; y <= scanMaxY; y++) {
+                        if (!SoftBeardAdaptation.shouldClearByDensity(
+                                x, y, z, minX, minY, minZ, maxX, maxY, maxZ, kernel)) {
+                            continue;
+                        }
+                        carved += carveCarvableAt(worldGenLevel, x, y, z);
+                    }
+                }
+            }
+        }
+        if (carved > 0 && logger != null && debug) {
+            logger.info("[structure-bridge] density-adapt " + carved + " blocks for "
+                    + (structureId == null ? "?" : structureId)
+                    + " (" + SoftBeardAdaptation.describeDensity() + ")");
+        }
+        return carved;
+    }
+
+    /**
+     * Per-piece soft cave_air carve intersecting this chunk (opt-in when
+     * density-adapt is off). Opens beard_box street volumes without excavating
+     * the StructureStart rectangular hull.
+     * <p>
+     * <strong>Watchdog-critical:</strong> uses only {@code WorldGenLevel#getBlockState}/
+     * {@code setBlock} on coordinates already clamped to the current populate chunk
+     * AABB. Must never call Bukkit {@code World#getBlockAt}/{@code getType} (those
+     * hit {@code CraftBlock} → {@code Level#getChunk} syncLoad and deadlock async
+     * features workers against the Server thread).
+     */
+    private static int softAdaptBeardPieces(
+            @NotNull Object worldGenLevel,
+            @NotNull Collection<?> pieces,
+            @NotNull Object chunkBoundingBox,
+            @Nullable String structureId,
+            @Nullable Logger logger
+    ) throws ReflectiveOperationException {
+        if (!beardCarveBound()) {
+            return 0;
+        }
+        int chunkMinX = (Integer) boundingBoxMinX.invoke(chunkBoundingBox);
+        int chunkMinY = (Integer) boundingBoxMinY.invoke(chunkBoundingBox);
+        int chunkMinZ = (Integer) boundingBoxMinZ.invoke(chunkBoundingBox);
+        int chunkMaxX = (Integer) boundingBoxMaxX.invoke(chunkBoundingBox);
+        int chunkMaxY = (Integer) boundingBoxMaxY.invoke(chunkBoundingBox);
+        int chunkMaxZ = (Integer) boundingBoxMaxZ.invoke(chunkBoundingBox);
+        int kernel = SoftBeardAdaptation.KERNEL_RADIUS;
+        int carved = 0;
+        for (Object piece : pieces) {
+            if (piece == null) {
+                continue;
+            }
+            Object pieceBox = structurePieceGetBoundingBox.invoke(piece);
+            if (pieceBox == null) {
+                continue;
+            }
+            int minX = (Integer) boundingBoxMinX.invoke(pieceBox);
+            int minY = (Integer) boundingBoxMinY.invoke(pieceBox);
+            int minZ = (Integer) boundingBoxMinZ.invoke(pieceBox);
+            int maxX = (Integer) boundingBoxMaxX.invoke(pieceBox);
+            int maxY = (Integer) boundingBoxMaxY.invoke(pieceBox);
+            int maxZ = (Integer) boundingBoxMaxZ.invoke(pieceBox);
+            // Strictly current-chunk AABB — never expand into neighbour columns.
+            int scanMinX = Math.max(chunkMinX, minX - kernel);
+            int scanMaxX = Math.min(chunkMaxX, maxX + kernel);
+            int scanMinY = Math.max(chunkMinY, minY - kernel);
+            int scanMaxY = Math.min(chunkMaxY, maxY + kernel);
+            int scanMinZ = Math.max(chunkMinZ, minZ - kernel);
+            int scanMaxZ = Math.min(chunkMaxZ, maxZ + kernel);
+            if (scanMinX > scanMaxX || scanMinY > scanMaxY || scanMinZ > scanMaxZ) {
+                continue;
+            }
+            for (int x = scanMinX; x <= scanMaxX; x++) {
+                for (int z = scanMinZ; z <= scanMaxZ; z++) {
+                    if (!SoftBeardAdaptation.influencesColumn(
+                            x, z, minX, minZ, maxX, maxZ, kernel)) {
+                        continue;
+                    }
                     for (int y = scanMinY; y <= scanMaxY; y++) {
                         if (!SoftBeardAdaptation.shouldCarve(
                                 x, y, z, minX, minY, minZ, maxX, maxY, maxZ, kernel)) {
                             continue;
                         }
-                        Material type = world.getBlockAt(x, y, z).getType();
-                        if (CARVABLE_TERRAIN.contains(type)) {
-                            world.getBlockAt(x, y, z).setType(Material.CAVE_AIR, false);
-                            carved++;
-                        }
+                        carved += carveCarvableAt(worldGenLevel, x, y, z);
                     }
                 }
             }
         }
-        if (carved > 0 && logger != null) {
+        if (carved > 0 && logger != null && debug) {
             logger.info("[structure-bridge] soft-beard " + carved + " blocks for "
                     + (structureId == null ? "?" : structureId)
                     + " (" + SoftBeardAdaptation.describe() + ")");
         }
         return carved;
+    }
+
+    private static boolean beardCarveBound() {
+        return structurePieceGetBoundingBox != null
+                && worldGenLevelGetBlockState != null
+                && worldGenLevelSetBlock != null
+                && blockPosCtor != null
+                && caveAirBlockState != null
+                && !carvableNmsBlocks.isEmpty();
+    }
+
+    /**
+     * Replace one carvable NMS block with cave_air via WorldGenLevel only.
+     *
+     * @return 1 if carved, 0 otherwise
+     */
+    private static int carveCarvableAt(@NotNull Object worldGenLevel, int x, int y, int z)
+            throws ReflectiveOperationException {
+        Object pos = blockPosCtor.newInstance(x, y, z);
+        Object state = worldGenLevelGetBlockState.invoke(worldGenLevel, pos);
+        if (!isCarvableNmsState(state)) {
+            return 0;
+        }
+        // Flag 2 = UPDATE_CLIENTS-ish during gen; avoid neighbour updates.
+        worldGenLevelSetBlock.invoke(worldGenLevel, pos, caveAirBlockState, 2);
+        return 1;
+    }
+
+    private static boolean isCarvableNmsState(@Nullable Object blockState)
+            throws ReflectiveOperationException {
+        if (blockState == null || blockStateGetBlock == null || carvableNmsBlocks.isEmpty()) {
+            return false;
+        }
+        Object block = blockStateGetBlock.invoke(blockState);
+        return block != null && carvableNmsBlocks.contains(block);
     }
 
     private static @Nullable World bukkitWorldOf(Object worldGenLevel) {
@@ -855,7 +1017,8 @@ public final class StructurePlacementBridge {
      * Whether {@code structureId} uses {@code beard_box} (manual place may pre-carve).
      * <p>
      * Stronghold uses {@code encapsulate} (solidify exterior) — never hollow-carve it.
-     * Natural generation uses per-piece {@link SoftBeardAdaptation}; this flag is for
+     * Natural generation may optionally use per-piece {@link SoftBeardAdaptation}
+     * when {@code structures.soft-beard=true}; this flag is for
      * {@link #preCarveForPlace} only.
      */
     public static boolean needsHollowCarve(@NotNull World world, @NotNull String structureId) {
@@ -914,7 +1077,7 @@ public final class StructurePlacementBridge {
                 }
             }
         }
-        if (logger != null) {
+        if (logger != null && debug) {
             logger.info("[structure-bridge] place-only soft ellipsoid carve " + carved
                     + " blocks for " + structureId
                     + " at " + originX + "," + originY + "," + originZ + " r=" + r
@@ -1177,7 +1340,17 @@ public final class StructurePlacementBridge {
                 resolve();
                 AVAILABLE.set(true);
                 if (logger != null) {
-                    logger.info("[structure-bridge] NMS placeInChunk bridge ready (keep CustomChunkGenerator heights).");
+                    if (heightmapSetHeight != null
+                            && chunkAccessGetOrCreateHeightmap != null
+                            && nmsGetBaseHeight != null) {
+                        logger.info("[structure-bridge] NMS placeInChunk bridge ready"
+                                + " (WG heightmap rewrite bound via "
+                                + heightmapSetHeight.getName() + ").");
+                    } else {
+                        logger.warning("[structure-bridge] NMS placeInChunk bridge ready,"
+                                + " but WG heightmap rewrite unbound — village roads /"
+                                + " terrain_matching may climb foliage.");
+                    }
                 }
             } catch (Throwable ex) {
                 AVAILABLE.set(false);
@@ -1285,6 +1458,15 @@ public final class StructurePlacementBridge {
         Class<?> blockState = Class.forName("net.minecraft.world.level.block.state.BlockState");
         blockStateClass = blockState;
         blockStateIsAir = blockState.getMethod("isAir");
+        blockStateGetBlock = blockState.getMethod("getBlock");
+
+        Class<?> blockPos = Class.forName("net.minecraft.core.BlockPos");
+        blockPosCtor = blockPos.getConstructor(int.class, int.class, int.class);
+        Class<?> blockGetter = Class.forName("net.minecraft.world.level.BlockGetter");
+        worldGenLevelGetBlockState = blockGetter.getMethod("getBlockState", blockPos);
+        Class<?> levelWriter = Class.forName("net.minecraft.world.level.LevelWriter");
+        worldGenLevelSetBlock = levelWriter.getMethod("setBlock", blockPos, blockState, int.class);
+        bindSoftBeardNmsBlocks();
 
         Class<?> serverLevel = Class.forName("net.minecraft.server.level.ServerLevel");
         serverLevelStructureManager = serverLevel.getMethod("structureManager");
@@ -1301,40 +1483,142 @@ public final class StructurePlacementBridge {
         worldgenRandomSetFeatureSeed = worldgenRandom.getMethod(
                 "setFeatureSeed", long.class, int.class, int.class);
 
-        heightmapTypesClass = Class.forName("net.minecraft.world.level.levelgen.Heightmap$Types");
-        Class<?> heightmap = Class.forName("net.minecraft.world.level.levelgen.Heightmap");
-        heightmapPrime = heightmap.getMethod("primeHeightmaps", chunkAccess, java.util.Set.class);
-        try {
-            heightmapSetHeight = heightmap.getMethod("setHeight", int.class, int.class, int.class);
-        } catch (NoSuchMethodException ex) {
-            heightmapSetHeight = heightmap.getMethod("set", int.class, int.class, int.class);
-        }
-        try {
-            chunkAccessGetOrCreateHeightmap = chunkAccess.getMethod(
-                    "getOrCreateHeightmapUnprimed", heightmapTypesClass);
-        } catch (NoSuchMethodException ex) {
-            chunkAccessGetOrCreateHeightmap = chunkAccess.getMethod(
-                    "getOrCreateHeightmap", heightmapTypesClass);
-        }
-        @SuppressWarnings({"unchecked", "rawtypes"})
-        Class<? extends Enum> hmEnum = (Class<? extends Enum>) heightmapTypesClass.asSubclass(Enum.class);
-        heightmapWorldSurfaceWg = Enum.valueOf(hmEnum, "WORLD_SURFACE_WG");
-        heightmapOceanFloorWg = Enum.valueOf(hmEnum, "OCEAN_FLOOR_WG");
+        // Heightmap WG rewrite is an enhancement for village roads / terrain_matching.
+        // Never let a missing private Heightmap mutator kill placeInChunk.
+        bindHeightmapRewriteHelpers(chunkAccess);
+    }
 
-        Class<?> chunkGenerator = Class.forName("net.minecraft.world.level.chunk.ChunkGenerator");
-        nmsGetBaseHeight = chunkGenerator.getMethod(
-                "getBaseHeight",
-                int.class,
-                int.class,
-                heightmapTypesClass,
-                Class.forName("net.minecraft.world.level.LevelHeightAccessor"),
-                Class.forName("net.minecraft.world.level.levelgen.RandomState")
-        );
+    /**
+     * Resolve NMS {@code Blocks.*} used by soft beard carve. Soft-beard is opt-in;
+     * failure here leaves {@link #carvableNmsBlocks} empty so carve becomes a no-op.
+     */
+    private static void bindSoftBeardNmsBlocks() {
+        caveAirBlockState = null;
+        carvableNmsBlocks = Set.of();
         try {
-            chunkSourceRandomState = Class.forName("net.minecraft.server.level.ServerChunkCache")
-                    .getMethod("randomState");
-        } catch (NoSuchMethodException ex) {
-            chunkSourceRandomState = null;
+            Class<?> blocks = Class.forName("net.minecraft.world.level.block.Blocks");
+            Class<?> block = Class.forName("net.minecraft.world.level.block.Block");
+            Method defaultState = block.getMethod("defaultBlockState");
+            Object caveAir = blocks.getField("CAVE_AIR").get(null);
+            caveAirBlockState = defaultState.invoke(caveAir);
+
+            String[] names = {
+                    "STONE", "DEEPSLATE", "TUFF", "GRANITE", "DIORITE", "ANDESITE", "CALCITE",
+                    "SMOOTH_BASALT", "DRIPSTONE_BLOCK", "DIRT", "COARSE_DIRT", "ROOTED_DIRT",
+                    "GRASS_BLOCK", "GRAVEL", "SAND", "RED_SAND", "CLAY", "MUD",
+                    "NETHERRACK", "BASALT", "BLACKSTONE", "END_STONE",
+                    "COAL_ORE", "DEEPSLATE_COAL_ORE", "IRON_ORE", "DEEPSLATE_IRON_ORE",
+                    "COPPER_ORE", "DEEPSLATE_COPPER_ORE", "GOLD_ORE", "DEEPSLATE_GOLD_ORE",
+                    "REDSTONE_ORE", "DEEPSLATE_REDSTONE_ORE", "LAPIS_ORE", "DEEPSLATE_LAPIS_ORE",
+                    "DIAMOND_ORE", "DEEPSLATE_DIAMOND_ORE", "EMERALD_ORE", "DEEPSLATE_EMERALD_ORE"
+            };
+            Set<Object> carved = new HashSet<>(names.length * 2);
+            for (String name : names) {
+                try {
+                    Object b = blocks.getField(name).get(null);
+                    if (b != null) {
+                        carved.add(b);
+                    }
+                } catch (NoSuchFieldException ignored) {
+                    // version skew — skip missing block
+                }
+            }
+            carvableNmsBlocks = Set.copyOf(carved);
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            caveAirBlockState = null;
+            carvableNmsBlocks = Set.of();
         }
+    }
+
+    /**
+     * Bind helpers used to restore {@code WORLD_SURFACE_WG} / {@code OCEAN_FLOOR_WG}
+     * from {@code ChunkGenerator#getBaseHeight} after {@code primeHeightmaps}.
+     * <p>
+     * Mojang 1.21.x maps the column mutator as {@code setHeight(III)}; Yarn calls it
+     * {@code set}. Both are <strong>private</strong> — {@link Class#getMethod} cannot
+     * see them (Paper/Leaves remap leaves Mojang names at runtime). Use declared lookup
+     * + {@code setAccessible}. Failure here must not abort {@link #resolve()}.
+     */
+    private static void bindHeightmapRewriteHelpers(Class<?> chunkAccess) {
+        heightmapPrime = null;
+        heightmapSetHeight = null;
+        chunkAccessGetOrCreateHeightmap = null;
+        nmsGetBaseHeight = null;
+        chunkSourceRandomState = null;
+        heightmapWorldSurfaceWg = null;
+        heightmapOceanFloorWg = null;
+        try {
+            heightmapTypesClass = Class.forName("net.minecraft.world.level.levelgen.Heightmap$Types");
+            Class<?> heightmap = Class.forName("net.minecraft.world.level.levelgen.Heightmap");
+            heightmapPrime = firstMethod(
+                    heightmap,
+                    new String[]{"primeHeightmaps", "populateHeightmaps"},
+                    chunkAccess,
+                    java.util.Set.class
+            );
+            // private void setHeight/set(int x, int z, int height) on 1.21.11
+            heightmapSetHeight = firstMethod(
+                    heightmap,
+                    new String[]{"setHeight", "set", "m_64245_", "method_12602"},
+                    int.class,
+                    int.class,
+                    int.class
+            );
+            chunkAccessGetOrCreateHeightmap = firstMethod(
+                    chunkAccess,
+                    new String[]{"getOrCreateHeightmapUnprimed", "getOrCreateHeightmap"},
+                    heightmapTypesClass
+            );
+            @SuppressWarnings({"unchecked", "rawtypes"})
+            Class<? extends Enum> hmEnum = (Class<? extends Enum>) heightmapTypesClass.asSubclass(Enum.class);
+            heightmapWorldSurfaceWg = Enum.valueOf(hmEnum, "WORLD_SURFACE_WG");
+            heightmapOceanFloorWg = Enum.valueOf(hmEnum, "OCEAN_FLOOR_WG");
+
+            Class<?> chunkGenerator = Class.forName("net.minecraft.world.level.chunk.ChunkGenerator");
+            nmsGetBaseHeight = firstMethod(
+                    chunkGenerator,
+                    new String[]{"getBaseHeight"},
+                    int.class,
+                    int.class,
+                    heightmapTypesClass,
+                    Class.forName("net.minecraft.world.level.LevelHeightAccessor"),
+                    Class.forName("net.minecraft.world.level.levelgen.RandomState")
+            );
+            chunkSourceRandomState = firstMethod(
+                    Class.forName("net.minecraft.server.level.ServerChunkCache"),
+                    new String[]{"randomState"}
+            );
+        } catch (ReflectiveOperationException | RuntimeException ignored) {
+            // leave nulls; restoreWorldgenHeightmaps no-ops when unbound
+        }
+    }
+
+    /**
+     * Resolve a method by candidate Mojang / Yarn / intermediary / SRG names.
+     * Tries {@link Class#getMethod} then {@link Class#getDeclaredMethod} (for private
+     * members such as {@code Heightmap#setHeight}).
+     */
+    private static @Nullable Method firstMethod(
+            Class<?> owner,
+            String[] names,
+            Class<?>... params
+    ) {
+        for (String name : names) {
+            try {
+                Method m = owner.getMethod(name, params);
+                m.setAccessible(true);
+                return m;
+            } catch (NoSuchMethodException ignored) {
+                // try declared / next candidate
+            }
+            try {
+                Method m = owner.getDeclaredMethod(name, params);
+                m.setAccessible(true);
+                return m;
+            } catch (NoSuchMethodException ignored) {
+                // next candidate
+            }
+        }
+        return null;
     }
 }

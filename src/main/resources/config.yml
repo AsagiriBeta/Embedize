@@ -1,8 +1,15 @@
 # Embedize — Java terrain + vanilla structure engine (GPLv3)
 #
 # Structures: per-source packs under /embedize-structure-packs/ discovered at bootstrap.
-# Minecraft's own JigsawPlacement / StructureSet pipeline places them when
-# Embedize generators return shouldGenerateStructures() == true.
+# Paper/Leaves have NO per-world datapack/registry — enable is server-global.
+# bundled-pack-mode (default embedize-worlds-only):
+#   - discover with autoEnableOnServerStart=false
+#   - BundledDatapackSync enables Embedize/struct-* + Embedize/biomes when an
+#     Embedize generator world exists or is expected (resource-reset / MV worlds.yml)
+#   - StructureWorldGateListener still cancels catalog + custom-ns natural spawn/locate
+#     outside Embedize worlds (dual insurance while packs are enabled), except
+#     progression-critical minecraft:stronghold (ender eyes / locate in default world)
+# Modes: embedize-worlds-only | always | never
 #
 # Generators: Embedize | Embedize:nether | Embedize:end
 #
@@ -17,7 +24,12 @@
 # Schedule uses real wall-clock time in the JVM system time zone.
 # Soft-depend PlaceholderAPI: %resource_reset_next|countdown|days|hours|mins%
 #
-# Structure placement — surface air + manual place carve
+# Verbose plugin logs (structure-bridge placeInChunk / density-adapt / soft-beard
+# per chunk, etc.). Keep false on production — enabling floods the console while
+# players explore.
+debug: false
+#
+# Structure placement — surface air + beard clearance + manual place carve
 # ------------------------------------------------------
 # surface-ignore-air (default true): template AIR is skipped ONLY for structures
 # classified as surface (generation step / terrain_adaptation / heightmap + path
@@ -28,13 +40,28 @@
 # keep-air-ids is only an explicit force-keep override for edge cases.
 #
 # place-hollow-carve: ONLY for /embedize place of beard_box (ancient_city).
-# Uses a soft ellipsoid (not a hard cube). Natural generation applies a per-piece
-# soft beard stand-in before placeInChunk — streets/plazas need density-style
-# clearance; building interiors already clear via template AIR. Never digs the
-# StructureStart AABB hull (that caused fake floating caverns).
+# Uses a soft ellipsoid (not a hard cube). Building interiors already clear via
+# template AIR. Never digs the StructureStart AABB hull (fake floating caverns).
+#
+# density-adapt (default true): natural-gen column-wise Beardifier stand-in for
+# beard_box / *:ancient_city before placeInChunk. Lowers solid fill inside each
+# structure piece BB (+ soft kernel) in the *current populate chunk only* via
+# WorldGenLevel — never CraftBlock.getType / syncLoad / neighbour forceload.
+# Not 1:1 with vanilla density router (no cross-chunk Beardifier contribution);
+# streets may be slightly tighter. Preferred over soft-beard for uptime + effect.
+#
+# soft-beard (default false): heavier per-voxel carve; applied only when
+# density-adapt is false. OFF by default — an earlier Bukkit getType path
+# sync-loaded neighbour chunks on Leaves Common Workers and deadlocked with
+# Server thread getChunk/syncLoad (50s+ "server has not responded"). When true
+# (and density-adapt off), carve still uses WorldGenLevel section data for the
+# current populate chunk only (no syncLoad).
 structures:
+  bundled-pack-mode: embedize-worlds-only
   surface-ignore-air: true
   place-hollow-carve: true
+  density-adapt: true
+  soft-beard: false
   # Optional force-keep overrides (full id, path, or :path suffix)
   keep-air-ids:
     - minecraft:ancient_city

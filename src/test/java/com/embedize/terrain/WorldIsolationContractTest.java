@@ -8,7 +8,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Contract: only worlds that ask for an Embedize generator receive Embedize
- * generation via {@link ChunkGenerator}. Vanilla worlds are untouched.
+ * generation via {@link ChunkGenerator}. Vanilla worlds keep vanilla noise.
+ * Bundled structure <em>datapacks</em> are discovered globally and enabled only
+ * when Embedize worlds are expected ({@code BundledDatapackSync}); natural spawn
+ * is gated separately by {@code StructureWorldGate}. Paper has no per-world registry.
  */
 class WorldIsolationContractTest {
 

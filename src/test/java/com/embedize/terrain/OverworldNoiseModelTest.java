@@ -95,6 +95,7 @@ class OverworldNoiseModelTest {
         OverworldNoiseModel model = new OverworldNoiseModel(99L);
         int caves = 0;
         int surfaceLeaks = 0;
+        int solidSamples = 0;
         for (int x = 0; x < 128; x += 3) {
             for (int z = 0; z < 128; z += 3) {
                 int surface = model.sample(x, z).surfaceY();
@@ -102,6 +103,7 @@ class OverworldNoiseModelTest {
                     continue;
                 }
                 for (int y = surface - 40; y < surface; y += 2) {
+                    solidSamples++;
                     if (!model.isCaveAir(x, y, z, surface)) {
                         continue;
                     }
@@ -112,7 +114,10 @@ class OverworldNoiseModelTest {
                 }
             }
         }
-        assertTrue(caves > 30, "expected noodle/cheese caves, got " + caves);
+        // Sparse but present (pre-tune floor was >30 on this same grid).
+        assertTrue(caves > 8, "expected some noodle/cheese caves, got " + caves);
+        assertTrue(caves * 20 < solidSamples,
+                "custom cave density still high: " + caves + "/" + solidSamples);
         assertEquals(0, surfaceLeaks);
     }
 

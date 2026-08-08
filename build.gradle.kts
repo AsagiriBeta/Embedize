@@ -38,11 +38,20 @@ tasks.test {
     useJUnitPlatform()
 }
 
-val structureDatapackDir = layout.buildDirectory.dir("embedize-structure-packs")
+val structureDatapackDir = layout.buildDirectory.dir(
+    when {
+        file("build/embedize-structure-packs/index.json").isFile -> "embedize-structure-packs"
+        // Windows lock fallback when the default tree cannot be cleared/rebuilt.
+        file("build/esp-rebuild/index.json").isFile -> "esp-rebuild"
+        else -> "embedize-structure-packs"
+    }
+)
 
 tasks.register("buildStructureDatapack") {
     description = "Build one structure datapack per .ref/datapacks source (+ bridge)"
     group = "build"
+    // Script clears/rewrites the whole tree; Windows AV + Gradle output hashing races.
+    doNotTrackState("structure datapack tree is fully rebuilt each run")
     outputs.dir(structureDatapackDir)
     inputs.files(
         fileTree(".ref/datapacks"),
@@ -98,15 +107,11 @@ tasks.jar {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
-// Alias kept for scripts/docs that still call fullJar — same bytes as tasks.jar.
-tasks.register<Jar>("fullJar") {
-    description = "Alias of jar (structure packs are always included)"
+// Alias for muscle-memory / old scripts — does not write a second jar.
+tasks.register("fullJar") {
+    description = "Alias of jar (structure packs are always included; no -full classifier)"
     group = "build"
     dependsOn(tasks.jar)
-    archiveBaseName.set("Embedize")
-    archiveClassifier.set("full")
-    from(zipTree(tasks.jar.flatMap { it.archiveFile }))
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
 tasks.withType<JavaCompile> {
@@ -116,23 +121,10 @@ tasks.withType<JavaCompile> {
 
 tasks.runServer {
     minecraftVersion("1.21.11")
-    // Single artifact only: default pluginJars = tasks.jar (now includes structure packs).
-    // Delete any *-full.jar twin so Paper does not see an ambiguous plugin name.
+    // Single artifact: tasks.jar includes structure packs.
     dependsOn(tasks.jar)
     pluginJars.setFrom(tasks.jar.flatMap { it.archiveFile })
     doFirst {
-        val libs = layout.buildDirectory.dir("libs").get().asFile
-        libs.listFiles()
-            ?.filter {
-                it.isFile
-                        && it.name.startsWith("Embedize-")
-                        && it.name.endsWith(".jar")
-                        && it.name.contains("-full")
-            }
-            ?.forEach {
-                logger.lifecycle("runServer: removing ambiguous ${it.name}")
-                it.delete()
-            }
         val runPlugins = layout.projectDirectory.dir("run/plugins").asFile
         if (runPlugins.isDirectory) {
             runPlugins.listFiles()

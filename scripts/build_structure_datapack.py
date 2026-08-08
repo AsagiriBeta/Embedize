@@ -13,10 +13,14 @@ template pools / NBT stay coherent within each upstream pack.
 """
 from __future__ import annotations
 
+import gzip
 import json
+import os
 import re
 import shutil
+import struct
 import sys
+import time
 import zipfile
 from pathlib import Path
 
@@ -99,14 +103,41 @@ VANILLA_FALLBACK_TAGS: dict[str, list[str]] = {
         "minecraft:the_end", "minecraft:end_highlands", "minecraft:end_midlands",
         "minecraft:end_barrens", "minecraft:small_end_islands",
     ],
+    # Surface land + Embedize 3D cave layer. Stronghold start_height is absolute Y≈-15
+    # and concentric-ring biome search samples near Y=0 — Embedize BiomeProvider returns
+    # lush/dripstone/deep_dark there, so rings/placement fail if only surface biomes remain.
     "minecraft:has_structure/stronghold": [
-        "minecraft:plains", "minecraft:forest", "minecraft:flower_forest",
-        "minecraft:birch_forest", "minecraft:dark_forest", "minecraft:taiga",
-        "minecraft:snowy_taiga", "minecraft:swamp", "minecraft:mangrove_swamp",
+        "minecraft:plains", "minecraft:sunflower_plains", "minecraft:meadow",
+        "minecraft:forest", "minecraft:flower_forest", "minecraft:birch_forest",
+        "minecraft:old_growth_birch_forest", "minecraft:dark_forest", "minecraft:cherry_grove",
+        "minecraft:taiga", "minecraft:old_growth_pine_taiga", "minecraft:old_growth_spruce_taiga",
+        "minecraft:snowy_taiga", "minecraft:snowy_plains", "minecraft:ice_spikes",
         "minecraft:jungle", "minecraft:sparse_jungle", "minecraft:bamboo_jungle",
-        "minecraft:savanna", "minecraft:desert", "minecraft:badlands",
-        "minecraft:meadow", "minecraft:cherry_grove", "minecraft:grove",
-        "minecraft:windswept_hills", "minecraft:sunflower_plains",
+        "minecraft:savanna", "minecraft:savanna_plateau", "minecraft:windswept_savanna",
+        "minecraft:desert", "minecraft:badlands", "minecraft:eroded_badlands",
+        "minecraft:wooded_badlands", "minecraft:swamp", "minecraft:mangrove_swamp",
+        "minecraft:windswept_hills", "minecraft:windswept_forest",
+        "minecraft:windswept_gravelly_hills", "minecraft:jagged_peaks",
+        "minecraft:frozen_peaks", "minecraft:stony_peaks", "minecraft:grove",
+        "minecraft:snowy_slopes",
+        "minecraft:lush_caves", "minecraft:dripstone_caves", "minecraft:deep_dark",
+    ],
+    # Concentric-rings preferred_biomes — must intersect Embedize biomes at search Y.
+    "minecraft:stronghold_biased_to": [
+        "minecraft:plains", "minecraft:sunflower_plains", "minecraft:meadow",
+        "minecraft:forest", "minecraft:flower_forest", "minecraft:birch_forest",
+        "minecraft:old_growth_birch_forest", "minecraft:dark_forest", "minecraft:cherry_grove",
+        "minecraft:taiga", "minecraft:old_growth_pine_taiga", "minecraft:old_growth_spruce_taiga",
+        "minecraft:snowy_taiga", "minecraft:snowy_plains", "minecraft:ice_spikes",
+        "minecraft:jungle", "minecraft:sparse_jungle", "minecraft:bamboo_jungle",
+        "minecraft:savanna", "minecraft:savanna_plateau", "minecraft:windswept_savanna",
+        "minecraft:desert", "minecraft:badlands", "minecraft:eroded_badlands",
+        "minecraft:wooded_badlands", "minecraft:swamp", "minecraft:mangrove_swamp",
+        "minecraft:windswept_hills", "minecraft:windswept_forest",
+        "minecraft:windswept_gravelly_hills", "minecraft:jagged_peaks",
+        "minecraft:frozen_peaks", "minecraft:stony_peaks", "minecraft:grove",
+        "minecraft:snowy_slopes",
+        "minecraft:lush_caves", "minecraft:dripstone_caves", "minecraft:deep_dark",
     ],
     "minecraft:has_structure/trial_chambers": [
         "minecraft:plains", "minecraft:forest", "minecraft:taiga", "minecraft:desert",
@@ -271,6 +302,12 @@ def normalize_data_rel(rel: str) -> str | None:
         # Normalize legacy plural
         rel = re.sub(r"/tags/blocks/", "/tags/block/", rel, flags=re.IGNORECASE)
         return rel if lower.endswith(".json") else None
+    # Trial spawner configs (1.21+): data/<ns>/trial_spawner/**/*.json
+    # Nova / DnT hang shrine, undead_crypt, cave_chambers, etc. here — omitting
+    # these yields "Failed to get element ResourceKey[minecraft:trial_spawner / …]".
+    # Do NOT ingest custom enchantment defs — vanilla server; strip refs in NBT instead.
+    if "/trial_spawner/" in lower:
+        return rel if lower.endswith(".json") else None
     # Template NBT: 1.21+ uses data/<ns>/structure/*.nbt (singular).
     # Legacy packs still ship data/<ns>/structures/ — normalize to singular so
     # StructureTemplateManager can find them (plural is ignored on 1.21+).
@@ -428,6 +465,20 @@ def sanitize_tag(tag_rel: str, data: dict) -> dict:
     return out
 
 
+# Keep these as tag refs on structure JSON so bridge/vanilla tag merge controls the
+# concrete biome set (critical for Embedize 3D cave biomes on stronghold).
+PRESERVE_STRUCTURE_BIOME_TAG_REFS = frozenset({
+    "minecraft:has_structure/stronghold",
+    "minecraft:has_structure/ancient_city",
+    "minecraft:has_structure/trial_chambers",
+    "minecraft:has_structure/mineshaft",
+    "minecraft:has_structure/mineshaft_mesa",
+    "minecraft:has_structure/ocean_monument",
+    "minecraft:has_structure/shipwreck",
+    "minecraft:has_structure/end_city",
+})
+
+
 def sanitize_structure_biomes(obj: dict, structure_path: str = "") -> dict:
     """Rewrite structure biomes filters to vanilla-safe tags/ids."""
     biomes = obj.get("biomes")
@@ -438,6 +489,11 @@ def sanitize_structure_biomes(obj: dict, structure_path: str = "") -> dict:
         "#minecraft:is_end" if is_end_tag_name(hint) else "#minecraft:is_overworld"
     )
     if isinstance(biomes, str):
+        body = biomes.strip().lower().lstrip("#")
+        if body in PRESERVE_STRUCTURE_BIOME_TAG_REFS:
+            obj = dict(obj)
+            obj["biomes"] = f"#{body}"
+            return obj
         expanded = expand_tag_ref(biomes)
         if len(expanded) == 1 and expanded[0].startswith("#"):
             obj = dict(obj)
@@ -567,6 +623,24 @@ def write_vanilla_structure_tags(out_root: Path) -> int:
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(
             json.dumps({"replace": False, "values": biomes}, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        n += 1
+    return n
+
+
+def write_progression_structure_tags(out_root: Path) -> int:
+    """Ensure eye-of-ender / locate still resolve minecraft:stronghold after pack overlays."""
+    tags = {
+        "minecraft:eye_of_ender_located": ["minecraft:stronghold"],
+    }
+    n = 0
+    for tag_id, values in tags.items():
+        ns, path = tag_id.split(":", 1)
+        dest = out_root / "data" / ns / "tags" / "worldgen" / "structure" / f"{path}.json"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_text(
+            json.dumps({"replace": False, "values": values}, indent=2) + "\n",
             encoding="utf-8",
         )
         n += 1
@@ -747,6 +821,744 @@ def collect_template_pool_ids(pack_root: Path) -> set[str]:
             path = path[:-5]
         ids.add(f"{ns}:{path}".lower())
     return ids
+
+
+# ---------------------------------------------------------------------------
+# Structure NBT entity sanitize (Paper/Leaves async chunk gen crash fix)
+# ---------------------------------------------------------------------------
+# Optional hardening for Embedize-generator worlds only (not the default-world fix):
+# StructureTemplate.placeEntities → Projectile setOwner → async getEntities can trip
+# Leaves AsyncCatcher. Prefer stripping Owner / OwnerUUID (keep decorative arrows).
+# Default `world` safety is StructureWorldGateListener — do not rely on this alone.
+#
+# TAG_* constants — Java Edition big-endian NBT (structure *.nbt).
+_TAG_END = 0
+_TAG_BYTE = 1
+_TAG_SHORT = 2
+_TAG_INT = 3
+_TAG_LONG = 4
+_TAG_FLOAT = 5
+_TAG_DOUBLE = 6
+_TAG_BYTE_ARRAY = 7
+_TAG_STRING = 8
+_TAG_LIST = 9
+_TAG_COMPOUND = 10
+_TAG_INT_ARRAY = 11
+_TAG_LONG_ARRAY = 12
+
+# Entity ids that extend Projectile (or otherwise resolve Owner via getEntities).
+# Match with or without minecraft: namespace; custom-ns projectiles unlikely but ids alone work.
+_PROJECTILE_ENTITY_IDS: frozenset[str] = frozenset({
+    "arrow",
+    "spectral_arrow",
+    "trident",
+    "egg",
+    "snowball",
+    "ender_pearl",
+    "experience_bottle",
+    "splash_potion",
+    "lingering_potion",
+    "potion",  # legacy id still seen in older templates
+    "llama_spit",
+    "shulker_bullet",
+    "wither_skull",
+    "fireball",
+    "small_fireball",
+    "dragon_fireball",
+    "firework_rocket",
+    "fishing_bobber",
+    "wind_charge",
+    "breeze_wind_charge",
+})
+
+# Attached entities that spam "Block-attached entity at invalid position" — keep by
+# default (not an AsyncCatcher hard-crash); counted for build logs.
+_ATTACHED_ENTITY_IDS: frozenset[str] = frozenset({
+    "item_frame",
+    "glow_item_frame",
+    "painting",
+})
+
+# UUID / owner refs that trigger async getEntities when projectiles load.
+_PROJECTILE_OWNER_KEYS: frozenset[str] = frozenset({
+    "Owner",
+    "OwnerUUID",  # legacy
+    "owner",
+})
+
+
+def _entity_id_path(raw: str) -> str:
+    """Normalize entity id to path only (minecraft:arrow → arrow)."""
+    s = raw.strip().lower()
+    if ":" in s:
+        return s.split(":", 1)[1]
+    return s
+
+
+def _is_projectile_entity_id(raw: str) -> bool:
+    return _entity_id_path(raw) in _PROJECTILE_ENTITY_IDS
+
+
+def _is_attached_entity_id(raw: str) -> bool:
+    return _entity_id_path(raw) in _ATTACHED_ENTITY_IDS
+
+
+class _NbtReader:
+    """Minimal big-endian Java NBT reader (structure templates)."""
+
+    __slots__ = ("_data", "_i")
+
+    def __init__(self, data: bytes):
+        self._data = data
+        self._i = 0
+
+    def _need(self, n: int) -> None:
+        if self._i + n > len(self._data):
+            raise ValueError("truncated NBT")
+
+    def u8(self) -> int:
+        self._need(1)
+        v = self._data[self._i]
+        self._i += 1
+        return v
+
+    def i8(self) -> int:
+        self._need(1)
+        v = struct.unpack_from(">b", self._data, self._i)[0]
+        self._i += 1
+        return v
+
+    def i16(self) -> int:
+        self._need(2)
+        v = struct.unpack_from(">h", self._data, self._i)[0]
+        self._i += 2
+        return v
+
+    def i32(self) -> int:
+        self._need(4)
+        v = struct.unpack_from(">i", self._data, self._i)[0]
+        self._i += 4
+        return v
+
+    def i64(self) -> int:
+        self._need(8)
+        v = struct.unpack_from(">q", self._data, self._i)[0]
+        self._i += 8
+        return v
+
+    def f32(self) -> float:
+        self._need(4)
+        v = struct.unpack_from(">f", self._data, self._i)[0]
+        self._i += 4
+        return v
+
+    def f64(self) -> float:
+        self._need(8)
+        v = struct.unpack_from(">d", self._data, self._i)[0]
+        self._i += 8
+        return v
+
+    def string(self) -> str:
+        n = self.i16()
+        if n < 0:
+            raise ValueError("negative NBT string length")
+        self._need(n)
+        s = self._data[self._i : self._i + n].decode("utf-8")
+        self._i += n
+        return s
+
+    def payload(self, tag: int):
+        if tag == _TAG_BYTE:
+            return self.i8()
+        if tag == _TAG_SHORT:
+            return self.i16()
+        if tag == _TAG_INT:
+            return self.i32()
+        if tag == _TAG_LONG:
+            return self.i64()
+        if tag == _TAG_FLOAT:
+            return self.f32()
+        if tag == _TAG_DOUBLE:
+            return self.f64()
+        if tag == _TAG_BYTE_ARRAY:
+            n = self.i32()
+            self._need(n)
+            out = self._data[self._i : self._i + n]
+            self._i += n
+            return out
+        if tag == _TAG_STRING:
+            return self.string()
+        if tag == _TAG_LIST:
+            et = self.u8()
+            n = self.i32()
+            if n < 0:
+                raise ValueError("negative NBT list length")
+            return (et, [self.payload(et) for _ in range(n)])
+        if tag == _TAG_COMPOUND:
+            return self.compound()
+        if tag == _TAG_INT_ARRAY:
+            n = self.i32()
+            self._need(4 * n)
+            out = list(struct.unpack_from(f">{n}i", self._data, self._i))
+            self._i += 4 * n
+            return out
+        if tag == _TAG_LONG_ARRAY:
+            n = self.i32()
+            self._need(8 * n)
+            out = list(struct.unpack_from(f">{n}q", self._data, self._i))
+            self._i += 8 * n
+            return out
+        raise ValueError(f"unknown NBT tag {tag}")
+
+    def compound(self) -> dict:
+        out: dict = {}
+        while True:
+            tag = self.u8()
+            if tag == _TAG_END:
+                break
+            name = self.string()
+            out[name] = (tag, self.payload(tag))
+        return out
+
+    def named_root(self) -> tuple[str, dict]:
+        """Read a named root compound (standard Java NBT file)."""
+        tag = self.u8()
+        if tag != _TAG_COMPOUND:
+            raise ValueError(f"expected root compound, got tag {tag}")
+        name = self.string()
+        return name, self.compound()
+
+
+class _NbtWriter:
+    """Minimal big-endian Java NBT writer."""
+
+    __slots__ = ("_buf",)
+
+    def __init__(self):
+        self._buf = bytearray()
+
+    def u8(self, v: int) -> None:
+        self._buf.append(v & 0xFF)
+
+    def i8(self, v: int) -> None:
+        self._buf += struct.pack(">b", v)
+
+    def i16(self, v: int) -> None:
+        self._buf += struct.pack(">h", v)
+
+    def i32(self, v: int) -> None:
+        self._buf += struct.pack(">i", v)
+
+    def i64(self, v: int) -> None:
+        self._buf += struct.pack(">q", v)
+
+    def f32(self, v: float) -> None:
+        self._buf += struct.pack(">f", v)
+
+    def f64(self, v: float) -> None:
+        self._buf += struct.pack(">d", v)
+
+    def string(self, s: str) -> None:
+        raw = s.encode("utf-8")
+        if len(raw) > 32767:
+            raise ValueError("NBT string too long")
+        self.i16(len(raw))
+        self._buf += raw
+
+    def payload(self, tag: int, value) -> None:
+        if tag == _TAG_BYTE:
+            self.i8(int(value))
+        elif tag == _TAG_SHORT:
+            self.i16(int(value))
+        elif tag == _TAG_INT:
+            self.i32(int(value))
+        elif tag == _TAG_LONG:
+            self.i64(int(value))
+        elif tag == _TAG_FLOAT:
+            self.f32(float(value))
+        elif tag == _TAG_DOUBLE:
+            self.f64(float(value))
+        elif tag == _TAG_BYTE_ARRAY:
+            raw = bytes(value)
+            self.i32(len(raw))
+            self._buf += raw
+        elif tag == _TAG_STRING:
+            self.string(str(value))
+        elif tag == _TAG_LIST:
+            et, items = value
+            self.u8(int(et))
+            self.i32(len(items))
+            for item in items:
+                self.payload(et, item)
+        elif tag == _TAG_COMPOUND:
+            self.compound(value)
+        elif tag == _TAG_INT_ARRAY:
+            self.i32(len(value))
+            self._buf += struct.pack(f">{len(value)}i", *value)
+        elif tag == _TAG_LONG_ARRAY:
+            self.i32(len(value))
+            self._buf += struct.pack(f">{len(value)}q", *value)
+        else:
+            raise ValueError(f"unknown NBT tag {tag}")
+
+    def compound(self, data: dict) -> None:
+        for name, (tag, value) in data.items():
+            self.u8(tag)
+            self.string(name)
+            self.payload(tag, value)
+        self.u8(_TAG_END)
+
+    def named_root(self, name: str, data: dict) -> bytes:
+        self.u8(_TAG_COMPOUND)
+        self.string(name)
+        self.compound(data)
+        return bytes(self._buf)
+
+
+def _structure_entity_id(entry: dict) -> str | None:
+    """Extract entity id from a structure entities[] compound entry."""
+    nbt = entry.get("nbt")
+    if not nbt or nbt[0] != _TAG_COMPOUND:
+        return None
+    body = nbt[1]
+    if not isinstance(body, dict):
+        return None
+    eid = body.get("id")
+    if not eid or eid[0] != _TAG_STRING:
+        return None
+    return str(eid[1])
+
+
+def _strip_projectile_owner_refs(entry: dict) -> tuple[dict, int]:
+    """
+    Drop Owner / OwnerUUID from a projectile entity entry.
+
+    Returns (possibly-new entry, number of keys removed).
+    Keeps the entity itself (decorative stuck arrows, etc.).
+    """
+    nbt = entry.get("nbt")
+    if not nbt or nbt[0] != _TAG_COMPOUND:
+        return entry, 0
+    body = nbt[1]
+    if not isinstance(body, dict):
+        return entry, 0
+    drop = [k for k in body if k in _PROJECTILE_OWNER_KEYS]
+    if not drop:
+        return entry, 0
+    cleaned_body = {k: v for k, v in body.items() if k not in _PROJECTILE_OWNER_KEYS}
+    out = dict(entry)
+    out["nbt"] = (_TAG_COMPOUND, cleaned_body)
+    return out, len(drop)
+
+
+def _attr_id_string(attr: dict) -> str | None:
+    """Return attribute id from legacy Name or modern id string tag."""
+    for key in ("id", "Name", "name"):
+        tag = attr.get(key)
+        if tag and tag[0] == _TAG_STRING:
+            return str(tag[1]).strip().lower()
+    return None
+
+
+def _is_unknown_mod_attribute(attr_id: str) -> bool:
+    """True for forge/neoforge attrs Paper cannot resolve (e.g. forge:entity_gravity)."""
+    if ":" not in attr_id:
+        return False
+    ns = attr_id.split(":", 1)[0]
+    return ns in ("forge", "neoforge")
+
+
+def _strip_forge_attributes_in_compound(body: dict) -> int:
+    """
+    Remove forge:/neoforge: entries from Attributes / attributes lists in-place.
+
+    Returns number of attribute compounds removed.
+    """
+    removed = 0
+    for key in ("Attributes", "attributes"):
+        tag = body.get(key)
+        if not tag or tag[0] != _TAG_LIST:
+            continue
+        et, items = tag[1]
+        if et != _TAG_COMPOUND or not items:
+            continue
+        kept: list = []
+        changed = False
+        for item in items:
+            if isinstance(item, dict):
+                aid = _attr_id_string(item)
+                if aid and _is_unknown_mod_attribute(aid):
+                    removed += 1
+                    changed = True
+                    continue
+            kept.append(item)
+        if changed:
+            body[key] = (_TAG_LIST, (_TAG_COMPOUND, kept))
+    return removed
+
+
+def _is_custom_enchantment_id(eid: str) -> bool:
+    """Non-vanilla enchantment id (e.g. nova_structures:jockey/…)."""
+    eid = eid.strip().lower()
+    if ":" not in eid:
+        # Bare ids are treated as minecraft: in JE; keep.
+        return False
+    return not eid.startswith("minecraft:")
+
+
+def _strip_custom_enchantments_in_compound(body: dict) -> int:
+    """
+    Drop all non-minecraft enchantment ids (vanilla server — no custom defs).
+
+    Keeps the item/entity; only removes illegal enchantment component entries.
+    Walks nested compounds/lists (equipment, components, block-entity Items, …).
+    """
+    removed = 0
+
+    def walk(node) -> bool:
+        nonlocal removed
+        changed = False
+        if isinstance(node, dict):
+            # 1.21 item components: minecraft:enchantments → { id: level_int, … }
+            ench = node.get("minecraft:enchantments")
+            if ench and ench[0] == _TAG_COMPOUND and isinstance(ench[1], dict):
+                cleaned = {}
+                local_changed = False
+                for eid, level in ench[1].items():
+                    eid_l = str(eid).strip().lower()
+                    if _is_custom_enchantment_id(eid_l):
+                        removed += 1
+                        local_changed = True
+                        continue
+                    cleaned[eid] = level
+                if local_changed:
+                    node["minecraft:enchantments"] = (_TAG_COMPOUND, cleaned)
+                    changed = True
+            # StoredEnchantments (books) + legacy Enchantments list
+            for key in ("Enchantments", "Enchantment", "StoredEnchantments"):
+                tag = node.get(key)
+                if not tag or tag[0] != _TAG_LIST:
+                    continue
+                et, items = tag[1]
+                if et != _TAG_COMPOUND:
+                    continue
+                kept: list = []
+                local_changed = False
+                for item in items:
+                    if isinstance(item, dict):
+                        eid = None
+                        for k in ("id", "id:", "Id"):
+                            t = item.get(k)
+                            if t and t[0] == _TAG_STRING:
+                                eid = str(t[1]).strip().lower()
+                                break
+                        if eid and _is_custom_enchantment_id(eid):
+                            removed += 1
+                            local_changed = True
+                            continue
+                    kept.append(item)
+                if local_changed:
+                    node[key] = (_TAG_LIST, (_TAG_COMPOUND, kept))
+                    changed = True
+            for _k, (t, v) in list(node.items()):
+                if t == _TAG_COMPOUND and isinstance(v, dict):
+                    if walk(v):
+                        changed = True
+                elif t == _TAG_LIST:
+                    et, items = v
+                    if et == _TAG_COMPOUND:
+                        for item in items:
+                            if isinstance(item, dict) and walk(item):
+                                changed = True
+        return changed
+
+    walk(body)
+    return removed
+
+
+def _sanitize_entity_entry_nbt(entry: dict) -> tuple[dict, int, int, int]:
+    """
+    Sanitize one structure entities[] entry.
+
+    Returns (entry, owner_keys_stripped, forge_attrs_stripped, enchants_stripped).
+    """
+    nbt = entry.get("nbt")
+    if not nbt or nbt[0] != _TAG_COMPOUND:
+        return entry, 0, 0, 0
+    body = nbt[1]
+    if not isinstance(body, dict):
+        return entry, 0, 0, 0
+
+    owners = 0
+    eid = _structure_entity_id(entry)
+    working = body
+    entry_out = entry
+    if eid and _is_projectile_entity_id(eid):
+        entry_out, owners = _strip_projectile_owner_refs(entry)
+        nbt2 = entry_out.get("nbt")
+        working = nbt2[1] if nbt2 and nbt2[0] == _TAG_COMPOUND else body
+
+    mutated = dict(working)
+    forge_n = _strip_forge_attributes_in_compound(mutated)
+    ench_n = _strip_custom_enchantments_in_compound(mutated)
+    if forge_n or ench_n or owners:
+        if entry_out is entry and (forge_n or ench_n):
+            entry_out = dict(entry)
+        entry_out["nbt"] = (_TAG_COMPOUND, mutated)
+    return entry_out, owners, forge_n, ench_n
+
+
+def _sanitize_block_entry_nbt(entry: dict) -> tuple[dict, int]:
+    """Strip custom enchants from a structure blocks[] entry (block-entity nbt)."""
+    nbt = entry.get("nbt")
+    if not nbt or nbt[0] != _TAG_COMPOUND:
+        return entry, 0
+    body = nbt[1]
+    if not isinstance(body, dict):
+        return entry, 0
+    mutated = dict(body)
+    ench_n = _strip_custom_enchantments_in_compound(mutated)
+    if not ench_n:
+        return entry, 0
+    out = dict(entry)
+    out["nbt"] = (_TAG_COMPOUND, mutated)
+    return out, ench_n
+
+
+def sanitize_structure_nbt_entities_bytes(
+    payload: bytes,
+) -> tuple[bytes, int, int, int, int]:
+    """
+    Sanitize a structure NBT payload.
+
+    - Strip Owner refs from projectiles (keep decorative arrows).
+    - Strip forge:/neoforge: attribute entries.
+    - Strip non-minecraft enchantment refs (keep item/entity).
+
+    Returns
+    (new_payload, owner_keys_stripped, attached_kept, forge_attrs_stripped, enchants_stripped).
+    """
+    reader = _NbtReader(payload)
+    root_name, root = reader.named_root()
+    changed = False
+    stripped = 0
+    attached = 0
+    forge_stripped = 0
+    ench_stripped = 0
+
+    entities = root.get("entities")
+    if entities and entities[0] == _TAG_LIST:
+        et, items = entities[1]
+        if et == _TAG_COMPOUND and items:
+            kept: list = []
+            for item in items:
+                if not isinstance(item, dict):
+                    kept.append(item)
+                    continue
+                eid = _structure_entity_id(item)
+                if eid and _is_attached_entity_id(eid):
+                    attached += 1
+                new_item, n_owner, n_forge, n_ench = _sanitize_entity_entry_nbt(item)
+                if n_owner or n_forge or n_ench:
+                    stripped += n_owner
+                    forge_stripped += n_forge
+                    ench_stripped += n_ench
+                    changed = True
+                kept.append(new_item)
+            if changed:
+                root = dict(root)
+                root["entities"] = (_TAG_LIST, (_TAG_COMPOUND, kept))
+
+    blocks = root.get("blocks")
+    if blocks and blocks[0] == _TAG_LIST:
+        et, items = blocks[1]
+        if et == _TAG_COMPOUND and items:
+            kept_blocks: list = []
+            blocks_changed = False
+            for item in items:
+                if not isinstance(item, dict):
+                    kept_blocks.append(item)
+                    continue
+                new_item, n_ench = _sanitize_block_entry_nbt(item)
+                if n_ench:
+                    ench_stripped += n_ench
+                    blocks_changed = True
+                    changed = True
+                kept_blocks.append(new_item)
+            if blocks_changed:
+                root = dict(root)
+                root["blocks"] = (_TAG_LIST, (_TAG_COMPOUND, kept_blocks))
+
+    if not changed:
+        return payload, 0, attached, 0, 0
+
+    out = _NbtWriter().named_root(root_name, root)
+    return out, stripped, attached, forge_stripped, ench_stripped
+
+
+def sanitize_structure_nbt_entities(pack_root: Path) -> tuple[int, int, int, int, int]:
+    """
+    Sanitize all structure *.nbt under pack_root.
+
+    Returns
+    (files_rewritten, owner_keys_stripped, attached_entities_seen,
+     forge_attrs_stripped, custom_enchants_stripped).
+    """
+    data = pack_root / "data"
+    if not data.is_dir():
+        return 0, 0, 0, 0, 0
+    files = 0
+    stripped_total = 0
+    attached_total = 0
+    forge_total = 0
+    ench_total = 0
+    for p in data.rglob("*.nbt"):
+        raw = p.read_bytes()
+        compressed = raw[:2] == b"\x1f\x8b"
+        try:
+            payload = gzip.decompress(raw) if compressed else raw
+        except OSError:
+            continue
+        try:
+            updated, stripped, attached, forge_n, ench_n = (
+                sanitize_structure_nbt_entities_bytes(payload)
+            )
+        except (ValueError, struct.error, UnicodeDecodeError) as ex:
+            print(f"  warn nbt entity sanitize skip {p.relative_to(pack_root)}: {ex}")
+            continue
+        attached_total += attached
+        if stripped <= 0 and forge_n <= 0 and ench_n <= 0:
+            continue
+        out = gzip.compress(updated) if compressed else updated
+        p.write_bytes(out)
+        files += 1
+        stripped_total += stripped
+        forge_total += forge_n
+        ench_total += ench_n
+    return files, stripped_total, attached_total, forge_total, ench_total
+
+
+# Same UTF-8 length — safe in-place NBT string payload rewrite (length prefix stays valid).
+# lukis-crazy-chambers vault terminals mistakenly use facing direction as pool id.
+_JIGSAW_POOL_SAME_LEN_REWRITES: tuple[tuple[bytes, bytes], ...] = (
+    (b"minecraft:south", b"minecraft:empty"),
+)
+
+# Missing pools referenced by pack NBT → copy or synthesize a local template_pool JSON.
+# Keys/values are resource ids (namespace:path).
+_MISSING_POOL_ALIASES: dict[str, str] = {
+    # steps.nbt uses short id; real pool is under spawner/
+    "crazy_chambers:melee_spawner": "crazy_chambers:spawner/melee_spawner",
+}
+
+_MISSING_POOL_SINGLE_ELEMENTS: dict[str, str] = {
+    # obstacles.nbt references a pool that was never shipped; breeze.nbt exists.
+    "crazy_chambers:spawner/breeze_spawner": "crazy_chambers:spawner/breeze",
+}
+
+
+def _pool_id_to_json_path(pack_root: Path, pool_id: str) -> Path | None:
+    if ":" not in pool_id:
+        return None
+    ns, path = pool_id.split(":", 1)
+    if not ns or not path or ".." in path:
+        return None
+    return pack_root / "data" / ns / "worldgen" / "template_pool" / f"{path}.json"
+
+
+def sanitize_jigsaw_nbt_pool_strings(pack_root: Path) -> int:
+    """Rewrite known bad equal-length jigsaw pool ids inside structure NBT."""
+    data = pack_root / "data"
+    if not data.is_dir():
+        return 0
+    files = 0
+    for p in data.rglob("*.nbt"):
+        raw = p.read_bytes()
+        compressed = raw[:2] == b"\x1f\x8b"
+        try:
+            payload = gzip.decompress(raw) if compressed else raw
+        except OSError:
+            continue
+        updated = payload
+        for old, new in _JIGSAW_POOL_SAME_LEN_REWRITES:
+            if len(old) != len(new):
+                raise AssertionError(f"rewrite length mismatch {old!r} -> {new!r}")
+            if old in updated:
+                updated = updated.replace(old, new)
+        if updated is payload or updated == payload:
+            continue
+        out = gzip.compress(updated) if compressed else updated
+        p.write_bytes(out)
+        files += 1
+    return files
+
+
+def ensure_missing_template_pools(pack_root: Path) -> int:
+    """Emit alias / stub template pools for known upstream NBT typos (pack-local only)."""
+    known = collect_template_pool_ids(pack_root)
+    created = 0
+
+    for alias_id, source_id in _MISSING_POOL_ALIASES.items():
+        if alias_id.lower() in known:
+            continue
+        if source_id.lower() not in known:
+            continue
+        src_path = _pool_id_to_json_path(pack_root, source_id)
+        dest_path = _pool_id_to_json_path(pack_root, alias_id)
+        if src_path is None or dest_path is None or not src_path.is_file():
+            continue
+        parsed = load_json_bytes(src_path.read_bytes())
+        if not isinstance(parsed, dict):
+            continue
+        parsed = dict(parsed)
+        parsed["name"] = alias_id
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        dest_path.write_text(json.dumps(parsed, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        known.add(alias_id.lower())
+        created += 1
+        print(f"  stub pool alias {alias_id} -> {source_id}")
+
+    for pool_id, location in _MISSING_POOL_SINGLE_ELEMENTS.items():
+        if pool_id.lower() in known:
+            continue
+        # Only synthesize inside packs that already ship the referenced template.
+        if not _pack_has_structure_template(pack_root, location):
+            continue
+        dest_path = _pool_id_to_json_path(pack_root, pool_id)
+        if dest_path is None:
+            continue
+        stub = {
+            "name": pool_id,
+            "fallback": "minecraft:empty",
+            "elements": [
+                {
+                    "weight": 1,
+                    "element": {
+                        "location": location,
+                        "processors": "minecraft:empty",
+                        "projection": "rigid",
+                        "element_type": "minecraft:single_pool_element",
+                    },
+                }
+            ],
+        }
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        dest_path.write_text(json.dumps(stub, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        known.add(pool_id.lower())
+        created += 1
+        print(f"  stub pool {pool_id} (element {location})")
+
+    return created
+
+
+def _pack_has_structure_template(pack_root: Path, template_id: str) -> bool:
+    """True when data/<ns>/structure/<path>.nbt exists in this pack."""
+    if ":" not in template_id:
+        return False
+    ns, path = template_id.split(":", 1)
+    if not ns or not path or ".." in path:
+        return False
+    return (pack_root / "data" / ns / "structure" / f"{path}.nbt").is_file()
 
 
 def strip_broken_vanilla_structure_overrides(pack_root: Path, known_pools: set[str]) -> int:
@@ -1039,11 +1851,35 @@ def build_bridge_pack(out_root: Path) -> Path:
     bridge.mkdir(parents=True)
     bridge_n = write_convention_bridges(bridge)
     tag_n = write_vanilla_structure_tags(bridge)
+    prog_n = write_progression_structure_tags(bridge)
     block_tag_n = ensure_missing_block_tags(bridge)
     ensure_noop_feature(bridge)
     write_pack_mcmeta(bridge, "Embedize structure bridge (#c/#forge + has_structure tags)")
-    print(f"bridge: convention={bridge_n} vanilla_tags={tag_n} block_tags={block_tag_n}")
+    print(
+        f"bridge: convention={bridge_n} vanilla_tags={tag_n} "
+        f"progression_tags={prog_n} block_tags={block_tag_n}"
+    )
     return bridge
+
+
+def _clear_dir(path: Path) -> None:
+    """Remove path; on Windows locks, rename aside so a fresh build can proceed."""
+    if not path.exists():
+        return
+    try:
+        shutil.rmtree(path)
+        return
+    except OSError:
+        pass
+    trash = path.with_name(f"{path.name}.old_{os.getpid()}_{int(time.time())}")
+    try:
+        path.rename(trash)
+        print(f"warn: could not delete {path} (in use); renamed to {trash.name}", file=sys.stderr)
+    except OSError as ex:
+        raise RuntimeError(
+            f"Cannot clear output dir {path} (file in use). "
+            f"Close IDE/indexers locking build/ and retry."
+        ) from ex
 
 
 def main() -> int:
@@ -1052,8 +1888,7 @@ def main() -> int:
         print(f"No packs under {REF}", file=sys.stderr)
         return 1
 
-    if OUT.exists():
-        shutil.rmtree(OUT)
+    _clear_dir(OUT)
     OUT.mkdir(parents=True)
 
     built: list[dict] = []
@@ -1075,7 +1910,14 @@ def main() -> int:
         nbt_n, json_n = ingest_source_into(pack_root, source)
         tag_n = sanitize_pack_biome_tags(pack_root)
         struct_n = sanitize_all_structure_json(pack_root)
+        nbt_pool_n = sanitize_jigsaw_nbt_pool_strings(pack_root)
+        ent_files, ent_owner_stripped, ent_attached, forge_stripped, ench_stripped = (
+            sanitize_structure_nbt_entities(pack_root)
+        )
         pools = collect_template_pool_ids(pack_root)
+        pool_stub_n = ensure_missing_template_pools(pack_root)
+        if pool_stub_n:
+            pools = collect_template_pool_ids(pack_root)
         stripped = strip_broken_vanilla_structure_overrides(pack_root, pools)
         stub_n = stub_missing_placed_features(pack_root)
         orphan_sets = prune_orphan_structure_sets(pack_root)
@@ -1095,6 +1937,13 @@ def main() -> int:
             "tags": tag_n,
             "structures": len(structures),
             "structureBiomesRewritten": struct_n,
+            "jigsawPoolNbtRewrites": nbt_pool_n,
+            "projectileOwnerKeysStripped": ent_owner_stripped,
+            "nbtFilesEntitySanitized": ent_files,
+            "attachedEntitiesSeen": ent_attached,
+            "forgeAttributesStripped": forge_stripped,
+            "customEnchantmentsStripped": ench_stripped,
+            "templatePoolStubs": pool_stub_n,
             "brokenVanillaOverridesStripped": stripped,
             "orphanStructureSetsPruned": orphan_sets,
             "placedFeatureStubs": stub_n,
@@ -1102,7 +1951,11 @@ def main() -> int:
         })
         print(
             f"  nbt={nbt_n} json={json_n} tags={tag_n} "
-            f"structure_biomes={struct_n} stripped_overrides={stripped} "
+            f"structure_biomes={struct_n} jigsaw_nbt={nbt_pool_n} "
+            f"proj_owner_stripped={ent_owner_stripped} nbt_ent_files={ent_files} "
+            f"attached={ent_attached} forge_attrs={forge_stripped} "
+            f"custom_ench={ench_stripped} "
+            f"pool_stubs={pool_stub_n} stripped_overrides={stripped} "
             f"orphan_sets={orphan_sets} stubs={stub_n} structures={len(structures)}"
         )
 

@@ -9,7 +9,10 @@
 Pass when all tests green, including:
 
 - `WorldIsolationContractTest` — ChunkGenerator path, no vanilla noise delegation; structures enabled
+- `StructureWorldGateContractTest` — catalog exact-id + custom-ns matching; pack-name heuristics;
+  `minecraft:stronghold` ungated everywhere (ender eyes / locate)
 - `TerrainGeneratorFactoryTest` — `shouldGenerateNoise() == false`, `shouldGenerateStructures() == true`
+- `SoftBeardAdaptationTest` / `StructureAirPolicyTest` — density-adapt defaults on, soft-beard off; column density helpers
 - existing terrain / biome tests
 
 ## L2 — structure datapack health
@@ -28,7 +31,7 @@ Pass when `build/embedize-structure-packs/` contains:
 ## L3 — world isolation (manual / integration)
 
 On a Paper/Leaves 1.21.11 server with Multiverse-Core 5.7.x and a **complete** jar
-(`Embedize-*-full.jar` or same-content `Embedize-*.jar` from `./gradlew fullJar` / `jar`):
+(`Embedize-*.jar` from `./gradlew jar`):
 
 1. Leave the default `world` on vanilla generation.
 2. `mv create resource normal --generator Embedize`
@@ -39,9 +42,16 @@ Pass when:
 
 - `/embedize worlds` shows vanilla worlds as `gen=vanilla` and resource worlds as Embedize generators
 - vanilla world F3 biome keys stay `minecraft:*` and are not forced onto Embedize terrain
+- **default `world` does not naturally place Embedize-bundled structures** (catalog ids + custom-ns;
+  `/embedize packs` shows gate policy; `/datapack list` may still list packs as enabled once any
+  Embedize world is expected — Paper global registry limitation)
+- with **no** Embedize world configured and `bundled-pack-mode: embedize-worlds-only`, packs stay
+  disabled and default `world` can keep a vanilla structure registry
 - resource worlds show Embedize terrain; `/embedize status` reports structure catalog + `engine=vanilla`
-- new chunks contain intact jigsaw structures (no leftover jigsaw blocks) for datapack overhauls
+- new chunks in Embedize worlds contain intact jigsaw structures (no leftover jigsaw blocks) for datapack overhauls
 - surface structures respect surface-ignore-air; underground cavities keep air as classified
+- ancient_city / beard_box streets: with default `density-adapt: true`, piece BB volumes in new chunks
+  should not stay fully solid (not 1:1 Beardifier; no CraftBlock.getType on workers)
 - `/resresetstatus` shows next monthly reset; `/resreset` recreates `resource` without long main-thread stall / mass kicks
 - with PlaceholderAPI installed: `/papi parse me %resource_reset_next%` and `%resource_reset_countdown%` resolve
 

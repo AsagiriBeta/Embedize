@@ -515,11 +515,16 @@ public final class OverworldTerrainGenerator extends ChunkGenerator implements E
             return false;
         }
         ensure(worldInfo);
-        // Allow vanilla noodle/cheese carvers on any chunk that isn't open ocean.
+        // Vanilla carvers on land only; sparsify with deepDark affinity so not every
+        // continental chunk is fully Swiss-cheesed (custom isCaveAir pass stays lighter too).
         int cx = (chunkX << 4) + 8;
         int cz = (chunkZ << 4) + 8;
         OverworldNoiseModel.Sample s = model.sample(cx, cz);
-        return s.surfaceY() >= OverworldNoiseModel.SEA_LEVEL - 2 && s.land() > 0.38;
+        if (s.surfaceY() < OverworldNoiseModel.SEA_LEVEL - 2 || s.land() <= 0.42) {
+            return false;
+        }
+        // ~45–55% of eligible land chunks keep vanilla cave/carver pass.
+        return model.deepDarkAffinity(cx, cz) > 0.0;
     }
 
     @Override

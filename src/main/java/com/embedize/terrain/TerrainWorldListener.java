@@ -16,7 +16,9 @@ import org.bukkit.generator.ChunkGenerator;
  * Structure <em>starts</em> come from {@code shouldGenerateStructures()} + datapacks;
  * piece placement is forced via {@link StructurePlacementPopulator} (TFG-style
  * {@code placeInChunk}), because Paper's CustomChunkGenerator path alone has left
- * ghost starts on fully custom terrain.
+ * ghost starts on fully custom terrain. Non-Embedize worlds never get these
+ * populators; bundled-structure natural spawn there is cancelled by
+ * {@code StructureWorldGateListener}.
  * <p>
  * Order matters: structure placement runs before foliage decoration so village
  * {@code terrain_matching} roads prefer bare ground; the bridge also restores

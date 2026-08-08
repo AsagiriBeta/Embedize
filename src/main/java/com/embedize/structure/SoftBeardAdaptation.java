@@ -11,15 +11,32 @@ import org.jetbrains.annotations.NotNull;
  * Paper {@code CustomChunkGenerator} with {@code shouldGenerateNoise=false}
  * never runs that pass.
  * <p>
- * This helper carves <strong>per piece box + soft shell</strong>, not the
- * StructureStart AABB hull (that produces the fake floating cavern).
- * Template AIR still clears building interiors; this only opens the
- * inter-piece volumes beard_box would have excavated.
+ * Embedize offers two approximations (both write only the current populate chunk
+ * via {@code WorldGenLevel} — never Bukkit {@code getType} / syncLoad):
+ * <ul>
+ *   <li>{@code structures.density-adapt} (default true) — column-wise density
+ *       falloff: lower solid fill inside piece BB + soft shell, closer in spirit
+ *       to Beardifier without an O(piece×kernel³) neighbour scan.</li>
+ *   <li>{@code structures.soft-beard} (default false) — heavier per-voxel carve;
+ *       kept as opt-in polish when density-adapt is off.</li>
+ * </ul>
+ * Template AIR still clears building interiors; these only open the inter-piece
+ * volumes beard_box would have excavated.
+ * <p>
+ * <strong>Not 1:1 with vanilla:</strong> no continuous density router, no
+ * cross-chunk Beardifier contribution from unloaded neighbours, streets may be
+ * slightly tighter or harder-edged. Prefer uptime over pixel parity.
  */
 public final class SoftBeardAdaptation {
 
     /** Matches vanilla {@code Beardifier.BEARD_KERNEL_RADIUS} spirit; keep modest. */
     public static final int KERNEL_RADIUS = 6;
+
+    /**
+     * Minimum density factor (0..1) to clear a solid block under density-adapt.
+     * Inside the piece box factor is 1; at kernel edge it approaches 0.
+     */
+    public static final double DENSITY_CLEAR_THRESHOLD = 0.35;
 
     private SoftBeardAdaptation() {
     }
@@ -54,6 +71,81 @@ public final class SoftBeardAdaptation {
         // Euclidean distance outside the box ≈ Beardifier kernel falloff region.
         double dist = Math.sqrt((double) dx * dx + (double) dy * dy + (double) dz * dz);
         return dist <= k;
+    }
+
+    /**
+     * Beardifier-like contribution in {@code [0,1]}: 1 inside the piece AABB,
+     * linear Euclidean falloff through the soft kernel, 0 beyond.
+     */
+    public static double densityFactor(
+            int x,
+            int y,
+            int z,
+            int minX,
+            int minY,
+            int minZ,
+            int maxX,
+            int maxY,
+            int maxZ,
+            int kernel
+    ) {
+        int dx = distOutside(x, minX, maxX);
+        int dy = distOutside(y, minY, maxY);
+        int dz = distOutside(z, minZ, maxZ);
+        if (dx == 0 && dy == 0 && dz == 0) {
+            return 1.0;
+        }
+        int k = Math.max(0, kernel);
+        if (k == 0) {
+            return 0.0;
+        }
+        double dist = Math.sqrt((double) dx * dx + (double) dy * dy + (double) dz * dz);
+        if (dist >= k) {
+            return 0.0;
+        }
+        return 1.0 - (dist / (double) k);
+    }
+
+    /** Clear when {@link #densityFactor} meets {@link #DENSITY_CLEAR_THRESHOLD}. */
+    public static boolean shouldClearByDensity(
+            int x,
+            int y,
+            int z,
+            int minX,
+            int minY,
+            int minZ,
+            int maxX,
+            int maxY,
+            int maxZ,
+            int kernel
+    ) {
+        return densityFactor(x, y, z, minX, minY, minZ, maxX, maxY, maxZ, kernel)
+                >= DENSITY_CLEAR_THRESHOLD;
+    }
+
+    /**
+     * Cheap XZ gate for column-wise passes: skip entire columns outside the
+     * piece box + kernel in the horizontal plane (no Y work, no block reads).
+     */
+    public static boolean influencesColumn(
+            int x,
+            int z,
+            int minX,
+            int minZ,
+            int maxX,
+            int maxZ,
+            int kernel
+    ) {
+        int dx = distOutside(x, minX, maxX);
+        int dz = distOutside(z, minZ, maxZ);
+        int k = Math.max(0, kernel);
+        if (dx == 0 && dz == 0) {
+            return true;
+        }
+        if (k == 0) {
+            return false;
+        }
+        return Math.sqrt((double) dx * dx + (double) dz * dz) <= k;
     }
 
     /** Chebyshev outside distance component along one axis (0 if inside). */
@@ -92,5 +184,11 @@ public final class SoftBeardAdaptation {
     public static @NotNull String describe() {
         return "soft beard_box stand-in: per-piece AABB + kernel=" + KERNEL_RADIUS
                 + " (not StructureStart hull)";
+    }
+
+    public static @NotNull String describeDensity() {
+        return "density-adapt column stand-in: per-piece AABB + kernel=" + KERNEL_RADIUS
+                + " threshold=" + DENSITY_CLEAR_THRESHOLD
+                + " (not vanilla Beardifier / not StructureStart hull)";
     }
 }

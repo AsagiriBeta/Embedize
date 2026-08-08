@@ -8,8 +8,8 @@
 | `.ref/plugins/` | ignored | 引擎研究（TerraformGenerator、BetterStructures 等） |
 
 ```bash
-./gradlew buildStructureDatapack fullJar
-# jar 与 fullJar 均含结构包；正式服安装 build/libs/Embedize-*-full.jar（或同内容的 Embedize-*.jar）
+./gradlew jar
+# jar 已含结构包；正式服安装 build/libs/Embedize-<version>.jar
 ```
 
 Build 从 `.ref/datapacks/` 为每个来源包输出完整数据包（不跨包合并文件），
@@ -36,7 +36,7 @@ NBT 落在 1.21+ 单数路径 `data/<ns>/structure/*.nbt`（旧 `structures/` �
 | Concern | Mechanism |
 |---------|-----------|
 | Custom biomes | Bootstrap `DATAPACK_DISCOVERY` → bundled `embedize-biomes` |
-| Structures | Bootstrap → bundled `embedize-structure-packs/*` + `shouldGenerateStructures()` → **vanilla** jigsaw |
+| Structures | Bootstrap → bundled `embedize-structure-packs/*` (global registry) + Embedize-world spawn gate + `shouldGenerateStructures()` → **vanilla** jigsaw |
 | Generators | `Embedize` / `Embedize:nether` / `Embedize:end` |
 
 ## Local toolchain (optional)

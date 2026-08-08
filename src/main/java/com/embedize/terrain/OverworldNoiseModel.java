@@ -54,8 +54,9 @@ final class OverworldNoiseModel {
         dune = octave(seed + 913L, 2, 1.0 / 64.0);
         meander = octave(seed + 1019L, 2, 1.0 / 240.0);
         patches = octave(seed + 1123L, 3, 1.0 / 40.0);
-        caveCheese = octave(seed + 1229L, 3, 1.0 / 96.0);
-        caveNoodle = octave(seed + 1331L, 2, 1.0 / 28.0);
+        // Larger scale + stricter thresholds in isCaveAir → fewer, less-connected caves.
+        caveCheese = octave(seed + 1229L, 3, 1.0 / 128.0);
+        caveNoodle = octave(seed + 1331L, 2, 1.0 / 42.0);
         // ~1.8k block scale → sparse deep_dark domains under continental land.
         deepDark = octave(seed + 1433L, 2, 1.0 / 1800.0);
     }
@@ -79,19 +80,24 @@ final class OverworldNoiseModel {
     }
 
     /**
-     * Extra cheese/noodle caves (vanilla carvers + this). Never opens the last few surface blocks.
+     * Extra cheese/noodle caves on top of vanilla carvers.
+     * Tuned sparse: noticeable chambers/tunnels without Swiss-cheese continents.
+     * Never opens the last few surface blocks.
      */
     boolean isCaveAir(int x, int y, int z, int surfaceY) {
         if (y <= -54 || y >= surfaceY - 3 || surfaceY < SEA_LEVEL - 2) {
             return false;
         }
-        double cy = y * 0.65;
+        double cy = y * 0.72;
         double cheese = caveCheese.noise(x, cy, z, 0.5, 0.5, true);
         double noodle = caveNoodle.noise(x, cy, z, 0.5, 0.5, true);
-        if (cheese > 0.58 && y < surfaceY - 14 && y < SEA_LEVEL + 20) {
+        // Cheese pockets: rarer, deeper-only (was 0.58 / SEA+20 / surface-14).
+        if (cheese > 0.80 && y < surfaceY - 18 && y < SEA_LEVEL) {
             return true;
         }
-        return Math.abs(noodle) < 0.075 && cheese > -0.15 && y < surfaceY - 6;
+        // Noodles: thinner tube + stricter cheese gate → less web connectivity
+        // (was |noodle|<0.075 && cheese>-0.15 && y<surface-6).
+        return Math.abs(noodle) < 0.030 && cheese > 0.18 && y < surfaceY - 12;
     }
 
     private static SimplexOctaveGenerator octave(long seed, int octaves, double scale) {

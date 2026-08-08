@@ -14,7 +14,7 @@ import java.util.Locale;
 
 /**
  * Controls whether structure template AIR may overwrite existing world blocks,
- * and whether manual {@code /embedize place} may pre-carve beard_box cavities.
+ * and whether natural / manual beard_box cavities may be opened in solid terrain.
  * <p>
  * When {@code surface-ignore-air} is enabled, air is skipped <em>only</em> for
  * structures classified as surface (generation step / terrain_adaptation /
@@ -24,7 +24,16 @@ import java.util.Locale;
  * filled with solid terrain.
  * <p>
  * {@code keep-air-ids} remains an explicit force-keep override, not the primary
- * Natural generation applies per-piece soft beard for {@code beard_box} streets;
+ * classifier.
+ * <p>
+ * Natural {@code beard_box} street clearance:
+ * <ul>
+ *   <li>{@code density-adapt} (default {@code true}) — column-wise density falloff
+ *       via WorldGenLevel on the current populate chunk only.</li>
+ *   <li>{@code soft-beard} (default {@code false}) — heavier per-voxel carve;
+ *       only used when density-adapt is off. Never enable Bukkit {@code getType}
+ *       on features workers (syncLoad / watchdog deadlock).</li>
+ * </ul>
  * {@code place-hollow-carve} applies only to the manual place command (soft ellipsoid).
  */
 public final class StructureAirPolicy {
@@ -46,11 +55,21 @@ public final class StructureAirPolicy {
 
     private final boolean surfaceIgnoreAir;
     private final boolean placeHollowCarve;
+    private final boolean densityAdapt;
+    private final boolean softBeard;
     private final List<String> keepAirIds;
 
-    StructureAirPolicy(boolean surfaceIgnoreAir, boolean placeHollowCarve, List<String> keepAirIds) {
+    StructureAirPolicy(
+            boolean surfaceIgnoreAir,
+            boolean placeHollowCarve,
+            boolean densityAdapt,
+            boolean softBeard,
+            List<String> keepAirIds
+    ) {
         this.surfaceIgnoreAir = surfaceIgnoreAir;
         this.placeHollowCarve = placeHollowCarve;
+        this.densityAdapt = densityAdapt;
+        this.softBeard = softBeard;
         this.keepAirIds = List.copyOf(keepAirIds);
     }
 
@@ -63,7 +82,7 @@ public final class StructureAirPolicy {
     }
 
     public static @NotNull StructureAirPolicy defaults() {
-        return new StructureAirPolicy(true, true, DEFAULT_KEEP_AIR);
+        return new StructureAirPolicy(true, true, true, false, DEFAULT_KEEP_AIR);
     }
 
     public static @NotNull StructureAirPolicy fromConfig(@NotNull FileConfiguration config) {
@@ -73,6 +92,10 @@ public final class StructureAirPolicy {
         }
         boolean ignore = root.getBoolean("surface-ignore-air", true);
         boolean placeCarve = root.getBoolean("place-hollow-carve", true);
+        // Default true: column density clearance (WorldGenLevel, current chunk only).
+        boolean densityAdapt = root.getBoolean("density-adapt", true);
+        // Default false: soft beard must never sync-load chunks on features workers.
+        boolean softBeard = root.getBoolean("soft-beard", false);
         List<String> keep = root.getStringList("keep-air-ids");
         if (keep == null || keep.isEmpty()) {
             keep = DEFAULT_KEEP_AIR;
@@ -85,7 +108,7 @@ public final class StructureAirPolicy {
             }
             keep = cleaned.isEmpty() ? DEFAULT_KEEP_AIR : cleaned;
         }
-        return new StructureAirPolicy(ignore, placeCarve, keep);
+        return new StructureAirPolicy(ignore, placeCarve, densityAdapt, softBeard, keep);
     }
 
     public boolean surfaceIgnoreAirEnabled() {
@@ -98,6 +121,25 @@ public final class StructureAirPolicy {
      */
     public boolean placeHollowCarveEnabled() {
         return placeHollowCarve;
+    }
+
+    /**
+     * Natural-gen column-wise density clearance for {@code beard_box} / ancient_city.
+     * Default {@code true}. Writes only via WorldGenLevel for the current populate
+     * chunk — never Bukkit {@code getType}/syncLoad. Preferred over {@link #softBeardEnabled()}.
+     */
+    public boolean densityAdaptEnabled() {
+        return densityAdapt;
+    }
+
+    /**
+     * Natural-gen per-piece soft beard for {@code beard_box} (ancient city streets).
+     * Default {@code false} — performance/watchdog safety. Applied only when
+     * {@link #densityAdaptEnabled()} is false. When enabled, carving must use
+     * WorldGenLevel section data only (never Bukkit {@code getType}/syncLoad).
+     */
+    public boolean softBeardEnabled() {
+        return softBeard;
     }
 
     public @NotNull List<String> keepAirIds() {

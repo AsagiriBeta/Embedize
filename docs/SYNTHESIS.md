@@ -68,11 +68,35 @@ Overworld floating stone over water is treated as **column integrity** (height/b
 2. Biome tags are sanitized **per pack** (no cross-pack merges) so jigsaw pools/NBT stay coherent.
    NBT templates are normalized to 1.21+ `data/<ns>/structure/*.nbt` (singular) — legacy
    `structures/` folders are rewritten at build time so `StructureTemplateManager` can load them.
-3. `jar` / `fullJar` embed `/embedize-structure-packs/` (same bytes; `-full` classifier is the install-friendly name); Bootstrap discovers each slug from `index.json` (overhauls late, bridge last)
-4. Embedize generators return `shouldGenerateStructures() == true` (+ decorations already on)
-5. Minecraft's own StructureSet / `JigsawPlacement` places pieces and runs `jigsaw_replacement`
+   Optional hardening: projectile **Owner / OwnerUUID** may be stripped while keeping arrow
+   entities (mitigates Leaves AsyncCatcher if `setOwner` hits async `getEntities`). This is
+   **not** what keeps default `world` safe — pack lazy-enable + the world gate are.
+3. `jar` embeds `/embedize-structure-packs/` (`fullJar` is an alias only); Bootstrap discovers each slug from `index.json` with `autoEnableOnServerStart(false)` (overhauls late, bridge last)
+4. `BundledDatapackSync` enables `Embedize/struct-*` + `Embedize/biomes` when an Embedize
+   world is loaded or expected (`resource-reset` / Multiverse `worlds.yml`). Enable is
+   **server-global** (Paper limitation).
+5. Embedize generators return `shouldGenerateStructures() == true` (+ decorations already on)
+6. Minecraft's own StructureSet / `JigsawPlacement` places pieces and runs `jigsaw_replacement`
+7. **World gate (dual insurance):** `StructureWorldGateListener` cancels `AsyncStructureSpawnEvent`
+   (and filters `StructuresLocateEvent`) for catalog exact ids + custom-namespace structures unless
+   `world.getGenerator() instanceof EmbedizeGenerator`
 
 No plugin-side jigsaw planner, piece queue, or `final_state` scrubber.
+
+### TFG vs Embedize (same product rule, different mechanism)
+
+| | TerraformGenerator | Embedize |
+|--|--------------------|----------|
+| Content | Java `StructureRegistry` populators (+ selective vanilla `tryGenerateStructure`) | Bundled real datapacks → vanilla jigsaw |
+| Where it runs | Only on TFG's injected `NMSChunkGenerator` (`createStructures` / BlockPopulator) | Vanilla pipeline + `StructurePlacementBridge` on Embedize worlds |
+| Non-plugin worlds | Never see TFG structures (generator instance absent) | Packs off until Embedize expected; while on, **global** registry + spawn/locate gate |
+| Locate | Override `findNearestMapStructure` on TFG generator | Filter `StructuresLocateEvent` outside Embedize worlds |
+
+Paper/Leaves have no per-world datapack API ([Paper#7347](https://github.com/PaperMC/Paper/issues/7347),
+[#10147](https://github.com/PaperMC/Paper/issues/10147) unlikely). Full TFG parity
+(“structures exist only on our NMS ChunkGenerator”) would mean abandoning bundled DnT
+datapacks for hand-written populators. This release gets closer via **lazy global enable**
++ **stronger gate**, not true per-world registry isolation.
 
 ## Multiverse
 
@@ -82,7 +106,9 @@ mv create resource-nether nether --generator Embedize:nether
 mv create resource-end the_end --generator Embedize:end
 ```
 
-No world allowlist. Vanilla structure biome filters apply per dimension.
+No world allowlist for **terrain**: only worlds that request an Embedize generator get custom
+noise. Bundled **structure natural spawn** is gated the same way (generator check), not by
+world name. Vanilla structure biome filters still apply per dimension inside Embedize worlds.
 
 ## Reference study (clean-room terrain)
 
@@ -101,16 +127,27 @@ real datapack content** for the vanilla engine:
 - Full Terralith multi-noise biome parameter space / skylands / arches
 - Overworld remains 2D heightmap + continuum, not full 3D density like Iris
 - Packs that hard-require missing mod biomes may still under-spawn until tags cover them
-- `beard_box` / Beardifier density adaptation is approximated post-noise via per-piece
-  soft carve (`SoftBeardAdaptation`) — not identical to vanilla density falloff. Old
-  chunks keep prior terrain; explore new areas after upgrade.
+- `beard_box` / Beardifier: Embedize never runs vanilla `fillFromNoise` density
+  subtraction (`shouldGenerateNoise=false`). Approximation:
+  - **`structures.density-adapt` (default true)** — column-wise density falloff per
+    structure *piece* BB (+ soft kernel) on the current populate chunk via
+    `WorldGenLevel` before `placeInChunk`. Closer in spirit to Beardifier; not a
+    continuous density router; no cross-chunk neighbour contribution.
+  - **`structures.soft-beard` (default false)** — heavier per-voxel carve; only when
+    density-adapt is off. Same WorldGenLevel / current-chunk rules (never
+    `CraftBlock.getType` / syncLoad on features workers).
+  Old chunks keep prior terrain; explore new areas after upgrade.
 - Surface `surface-ignore-air` and place-only soft carve do not claim seamless vanilla parity;
   rivers / sandboxes can still look wrong under manual `/embedize place`.
+- While bundled packs are enabled, the structure registry is **shared**. Non-Embedize worlds
+  get spawn/locate gating (catalog ids + custom ns), not a second vanilla definition for
+  overhauled `minecraft:*` ids. With no Embedize world expected, packs stay disabled and the
+  shared registry can remain vanilla.
 
 ### Rebuild
 
 ```bash
-./gradlew clean fullJar
-# Install: build/libs/Embedize-<version>-full.jar  (or Embedize-<version>.jar — same contents)
+./gradlew clean jar
+# Install: build/libs/Embedize-<version>.jar
 ./gradlew test
 ```

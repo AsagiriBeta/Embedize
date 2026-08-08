@@ -59,7 +59,8 @@ final class StructureAirPolicyTest {
 
     @Test
     void disabledFlagNeverIgnores() {
-        StructureAirPolicy policy = new StructureAirPolicy(false, true, List.of("minecraft:ancient_city"));
+        StructureAirPolicy policy = new StructureAirPolicy(
+                false, true, true, false, List.of("minecraft:ancient_city"));
         assertFalse(policy.shouldIgnoreAir("minecraft:village_plains"));
         assertFalse(policy.shouldIgnoreAir("minecraft:ancient_city"));
     }
@@ -68,5 +69,17 @@ final class StructureAirPolicyTest {
     void placeHollowCarveDefaultsOn() {
         StructureAirPolicy policy = StructureAirPolicy.defaults();
         assertTrue(policy.placeHollowCarveEnabled());
+    }
+
+    @Test
+    void densityAdaptDefaultsOn() {
+        StructureAirPolicy policy = StructureAirPolicy.defaults();
+        assertTrue(policy.densityAdaptEnabled());
+    }
+
+    @Test
+    void softBeardDefaultsOff() {
+        StructureAirPolicy policy = StructureAirPolicy.defaults();
+        assertFalse(policy.softBeardEnabled());
     }
 }
