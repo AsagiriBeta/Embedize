@@ -2,6 +2,12 @@ package com.embedize.compat;
 
 import com.embedize.EmbedizePlugin;
 import org.bukkit.Bukkit;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.HandlerList;
+import org.bukkit.event.Listener;
+import org.bukkit.event.server.PluginDisableEvent;
+import org.bukkit.event.server.PluginEnableEvent;
 import org.bukkit.plugin.Plugin;
 
 import java.util.logging.Level;
@@ -11,24 +17,57 @@ import java.util.logging.Level;
  * Implementation class is loaded only when Multiverse-Core is present so missing
  * Multiverse classes never break servers without it.
  */
-public final class MultiverseHook {
+public final class MultiverseHook implements Listener {
 
-    private final MultiverseAccess access;
-    private final boolean terraformGeneratorPresent;
+    private final EmbedizePlugin plugin;
+    private volatile MultiverseAccess access = MultiverseAccess.NOOP;
 
     public MultiverseHook(EmbedizePlugin plugin) {
+        this.plugin = plugin;
+        Bukkit.getPluginManager().registerEvents(this, plugin);
+        bindIfPresent();
+    }
+
+    private synchronized void bindIfPresent() {
+        if (access != MultiverseAccess.NOOP) {
+            return;
+        }
         this.access = createAccess(plugin);
-        Plugin tfg = Bukkit.getPluginManager().getPlugin("TerraformGenerator");
-        this.terraformGeneratorPresent = tfg != null && tfg.isEnabled();
         if (access.isAvailable()) {
             plugin.getLogger().info("Multiverse-Core integration enabled (typed API v"
                     + access.getVersion() + ").");
         } else if (Bukkit.getPluginManager().getPlugin("Multiverse-Core") != null) {
             plugin.getLogger().info("Multiverse-Core detected; API will bind when Multiverse finishes loading.");
         }
-        if (terraformGeneratorPresent) {
-            plugin.getLogger().info("TerraformGenerator detected — optional biome-tag bridge only "
-                    + "(TFG has no public plugin API).");
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public void onPluginEnable(PluginEnableEvent event) {
+        if (event.getPlugin().getName().equals("Multiverse-Core")) {
+            bindIfPresent();
+        }
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR)
+    public synchronized void onPluginDisable(PluginDisableEvent event) {
+        if (!event.getPlugin().getName().equals("Multiverse-Core")) {
+            return;
+        }
+        detachAccessListener();
+        access = MultiverseAccess.NOOP;
+        plugin.getLogger().info("Multiverse-Core integration unbound.");
+    }
+
+    public synchronized void shutdown() {
+        detachAccessListener();
+        access = MultiverseAccess.NOOP;
+        HandlerList.unregisterAll(this);
+    }
+
+    private void detachAccessListener() {
+        MultiverseAccess current = access;
+        if (current instanceof Listener listener) {
+            HandlerList.unregisterAll(listener);
         }
     }
 
@@ -53,28 +92,5 @@ public final class MultiverseHook {
 
     public boolean isPresent() {
         return access.isAvailable();
-    }
-
-    public boolean isTerraformGeneratorPresent() {
-        return terraformGeneratorPresent;
-    }
-
-    public java.util.Optional<String> resolveWorldName(String token) {
-        return access.resolveWorldName(token);
-    }
-
-    public boolean matchesConfiguredWorld(String bukkitWorldName, Iterable<String> configured, boolean resolveAliases) {
-        if (!resolveAliases) {
-            if (bukkitWorldName == null) {
-                return false;
-            }
-            for (String configuredWorld : configured) {
-                if (configuredWorld != null && configuredWorld.equalsIgnoreCase(bukkitWorldName)) {
-                    return true;
-                }
-            }
-            return false;
-        }
-        return access.matchesConfiguredWorld(bukkitWorldName, configured);
     }
 }

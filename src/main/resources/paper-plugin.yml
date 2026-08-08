@@ -1,0 +1,56 @@
+name: Embedize
+version: '${version}'
+main: com.embedize.EmbedizePlugin
+bootstrapper: com.embedize.bootstrap.EmbedizeBootstrap
+api-version: '1.21'
+folia-supported: true
+authors:
+  - Embedize
+description: GPLv3 Java terrain + vanilla structure/jigsaw engine (bundled datapack). Generators Embedize / Embedize:nether / Embedize:end.
+dependencies:
+  server:
+    Multiverse-Core:
+      # load: AFTER => Multiverse enables after Embedize, so --generator Embedize resolves.
+      load: AFTER
+      required: false
+      join-classpath: true
+    LuckPerms:
+      load: BEFORE
+      required: false
+      join-classpath: true
+    WorldEdit:
+      load: BEFORE
+      required: false
+      join-classpath: true
+    PlaceholderAPI:
+      load: BEFORE
+      required: false
+      join-classpath: true
+permissions:
+  embedize.admin:
+    description: Full Embedize administration
+    default: op
+    children:
+      embedize.border.admin: true
+      embedize.command.reload: true
+      embedize.command.status: true
+      embedize.command.place: true
+      embedize.command.reset: true
+  embedize.border.admin:
+    description: Manage invisible world borders
+    default: op
+  embedize.border.bypass:
+    description: Bypass invisible world borders
+    default: false
+  embedize.command.reload:
+    description: Reload Embedize
+    default: op
+  embedize.command.status:
+    description: View Embedize status
+    default: op
+  embedize.command.place:
+    description: Debug-place a single structure template
+    default: op
+  embedize.command.reset:
+    description: Reset the resource world (manual / status / unlock)
+    default: op

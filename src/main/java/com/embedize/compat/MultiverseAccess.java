@@ -3,6 +3,7 @@ package com.embedize.compat;
 import org.bukkit.Location;
 import org.bukkit.World;
 import org.bukkit.entity.Entity;
+import org.jetbrains.annotations.Nullable;
 
 import java.util.List;
 import java.util.Optional;
@@ -34,26 +35,12 @@ public interface MultiverseAccess {
             if (token == null || token.isBlank()) {
                 return Optional.empty();
             }
-            World direct = org.bukkit.Bukkit.getWorld(token);
-            return Optional.of(direct != null ? direct.getName() : token.trim());
+            return Optional.of(token.trim());
         }
 
         @Override
         public Optional<String> getWorldAlias(String worldName) {
             return Optional.empty();
-        }
-
-        @Override
-        public boolean matchesConfiguredWorld(String bukkitWorldName, Iterable<String> configured) {
-            if (bukkitWorldName == null) {
-                return false;
-            }
-            for (String configuredWorld : configured) {
-                if (configuredWorld != null && configuredWorld.equalsIgnoreCase(bukkitWorldName)) {
-                    return true;
-                }
-            }
-            return false;
         }
 
         @Override
@@ -75,6 +62,21 @@ public interface MultiverseAccess {
         public boolean teleportSafely(Entity entity, Location destination) {
             return entity != null && destination != null && entity.teleport(destination);
         }
+
+        @Override
+        public boolean detachWorldForReset(String worldName) {
+            return false;
+        }
+
+        @Override
+        public boolean registerLoadedWorld(World world, @Nullable String generator) {
+            return false;
+        }
+
+        @Override
+        public boolean configureResourceWorld(String worldName, String alias) {
+            return false;
+        }
     };
 
     boolean isAvailable();
@@ -91,12 +93,6 @@ public interface MultiverseAccess {
     /** Multiverse alias for a world, if set. */
     Optional<String> getWorldAlias(String worldName);
 
-    /**
-     * Whether {@code bukkitWorldName} matches any configured entry
-     * (exact name or via Multiverse alias / {@code getWorldByNameOrAlias}).
-     */
-    boolean matchesConfiguredWorld(String bukkitWorldName, Iterable<String> configured);
-
     /** Names of all worlds Multiverse knows about (loaded + unloaded). */
     List<String> listManagedWorldNames();
 
@@ -112,4 +108,25 @@ public interface MultiverseAccess {
      * Teleport using Multiverse safety checking when available.
      */
     boolean teleportSafely(Entity entity, Location destination);
+
+    /**
+     * Unload the Bukkit world <em>without saving</em> and remove it from Multiverse
+     * config. Resource reset deletes the folder next, so flushing chunks only stalls
+     * the server thread (minutes on large resource worlds).
+     *
+     * @return {@code true} if Multiverse no longer manages the world name
+     */
+    boolean detachWorldForReset(String worldName);
+
+    /**
+     * Register an already-loaded Bukkit world with Multiverse (no spawn adjust,
+     * no folder check). Prefer this over console {@code mv import}, which can
+     * block for tens of seconds when it first touches Embedize spawn chunks.
+     */
+    boolean registerLoadedWorld(World world, @Nullable String generator);
+
+    /**
+     * Set alias / adjust-spawn / keep-spawn-in-memory via Multiverse API.
+     */
+    boolean configureResourceWorld(String worldName, String alias);
 }

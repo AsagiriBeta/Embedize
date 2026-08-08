@@ -1,0 +1,8 @@
+[
+  {
+    "id": "embedize:abyssal_deep",
+    "vanilla": "minecraft:deep_ocean",
+    "dimension": "ow",
+    "role": "far-ocean trench (unique); ordinary deep_ocean stays vanilla"
+  }
+]

@@ -1,6 +1,0 @@
-{
-  "replace": false,
-  "values": [
-    { "id": "terraformgenerator:crystalline_cluster", "required": false }
-  ]
-}

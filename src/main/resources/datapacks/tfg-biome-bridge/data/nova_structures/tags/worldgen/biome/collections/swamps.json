@@ -1,6 +1,0 @@
-{
-  "replace": false,
-  "values": [
-    { "id": "terraformgenerator:muddy_bog", "required": false }
-  ]
-}

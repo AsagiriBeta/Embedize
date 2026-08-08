@@ -11,21 +11,17 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.PluginManager;
 import org.bukkit.plugin.RegisteredServiceProvider;
 
-import java.util.Locale;
-import java.util.Set;
 import java.util.logging.Logger;
 
 /**
  * LuckPerms compatibility via Bukkit permissions (LP injects into hasPermission)
- * plus optional API detection for diagnostics / dynamic permission registration.
+ * plus optional API detection for diagnostics.
  *
  * @see <a href="https://luckperms.net/wiki/Developer-API">LuckPerms Developer API</a>
  */
 public final class LuckPermsHook {
 
     public static final String PERM_ADMIN = "embedize.admin";
-    public static final String PERM_GROUP_ADMIN = "embedize.group.admin";
-    public static final String PERM_GROUP_PREFIX = "embedize.group.";
 
     private final EmbedizePlugin plugin;
     private final Logger logger;
@@ -66,64 +62,33 @@ public final class LuckPermsHook {
         return api;
     }
 
-    /**
-     * Register base + per-group permission nodes so LuckPerms can autocomplete / suggest them.
-     */
     public void registerBasePermissions() {
         PluginManager pm = Bukkit.getPluginManager();
         ensurePermission(pm, PERM_ADMIN, "Full Embedize administration", PermissionDefault.OP);
-        ensurePermission(pm, PERM_GROUP_ADMIN, "Manage all Embedize structure groups", PermissionDefault.OP);
         ensurePermission(pm, "embedize.command.reload", "Reload Embedize", PermissionDefault.OP);
         ensurePermission(pm, "embedize.command.status", "View Embedize status", PermissionDefault.OP);
+        ensurePermission(pm, "embedize.command.place", "Debug-place structure templates", PermissionDefault.OP);
+        ensurePermission(pm, "embedize.command.reset", "Reset the resource world", PermissionDefault.OP);
         ensurePermission(pm, "embedize.border.admin", "Manage Embedize world borders", PermissionDefault.OP);
         ensurePermission(pm, "embedize.border.bypass", "Bypass Embedize world borders", PermissionDefault.FALSE);
     }
 
-    public void registerGroupPermissions(Set<String> groupIds) {
-        PluginManager pm = Bukkit.getPluginManager();
-        for (String id : groupIds) {
-            String node = groupManagePermission(id);
-            ensurePermission(pm, node, "Manage Embedize group '" + id + "'", PermissionDefault.OP);
-            ensurePermission(pm, groupViewPermission(id), "View Embedize group '" + id + "'", PermissionDefault.OP);
-        }
-    }
-
-    private static void ensurePermission(PluginManager pm, String name, String description, PermissionDefault def) {
+    private static void ensurePermission(PluginManager pm, String name, String desc, PermissionDefault def) {
         Permission existing = pm.getPermission(name);
         if (existing == null) {
-            pm.addPermission(new Permission(name, description, def));
+            pm.addPermission(new Permission(name, desc, def));
         }
-    }
-
-    public static String groupManagePermission(String groupId) {
-        return PERM_GROUP_PREFIX + groupId.toLowerCase(Locale.ROOT) + ".manage";
-    }
-
-    public static String groupViewPermission(String groupId) {
-        return PERM_GROUP_PREFIX + groupId.toLowerCase(Locale.ROOT) + ".view";
     }
 
     public boolean hasAdmin(CommandSender sender) {
-        return sender.hasPermission(PERM_ADMIN);
+        return sender.hasPermission(PERM_ADMIN) || sender.isOp();
     }
 
-    public boolean canManageGroups(CommandSender sender) {
-        return hasAdmin(sender) || sender.hasPermission(PERM_GROUP_ADMIN);
+    public boolean hasBorderBypass(Player player) {
+        return player.hasPermission("embedize.border.bypass") || player.isOp();
     }
 
-    public boolean canManageGroup(CommandSender sender, String groupId) {
-        return canManageGroups(sender) || sender.hasPermission(groupManagePermission(groupId));
-    }
-
-    public boolean canViewGroup(CommandSender sender, String groupId) {
-        return canManageGroup(sender, groupId) || sender.hasPermission(groupViewPermission(groupId));
-    }
-
-    /**
-     * Online player permission check — works with LuckPerms through Bukkit bridge.
-     * Safe to call sync for online players.
-     */
-    public boolean playerHas(Player player, String permission) {
-        return player.hasPermission(permission);
+    public String describe() {
+        return present ? "LuckPerms bound" : "LuckPerms absent (Bukkit perms only)";
     }
 }

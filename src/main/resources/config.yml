@@ -1,28 +1,65 @@
-# Embedize
+# Embedize — Java terrain + vanilla structure engine (GPLv3)
 #
-# Place structure datapacks yourself in the world datapacks/ folder.
-# This plugin isolates their natural generation via groups (groups.yml)
-# and optionally enforces invisible knockback borders (borders.yml).
-# Vanilla minecraft: structures are never touched.
+# Structures: per-source packs under /embedize-structure-packs/ discovered at bootstrap.
+# Minecraft's own JigsawPlacement / StructureSet pipeline places them when
+# Embedize generators return shouldGenerateStructures() == true.
+#
+# Generators: Embedize | Embedize:nether | Embedize:end
+#
+# Overworld BiomeProvider is 3D: lush_caves / dripstone_caves below the surface,
+# sparse deep_dark under continental land (Y<0) for ancient_city. See docs/SYNTHESIS.md.
 
-enabled: true
+# Monthly / manual resource-world reset (replaces Skript resource_world_reset*.sk).
+# Requires Multiverse-Core. Unload/delete via mv; recreate via Bukkit WorldCreator
+# (fixed Embedize spawn + keepSpawnLoaded false) so Paper does not stall the Server
+# thread 30–60s on "Selecting spawn point" / spawn-area prep — that stall kicks
+# main-world players via keepalive timeout. Avoids `mv import` reload for the same reason.
+# Schedule uses real wall-clock time in the JVM system time zone.
+# Soft-depend PlaceholderAPI: %resource_reset_next|countdown|days|hours|mins%
+#
+# Structure placement — surface air + manual place carve
+# ------------------------------------------------------
+# surface-ignore-air (default true): template AIR is skipped ONLY for structures
+# classified as surface (generation step / terrain_adaptation / heightmap + path
+# heuristics). Underground / unknown keep air so interiors clear solid terrain.
+# This is property-based — NOT a vanilla-id whitelist — so it covers:
+#   - datapack-added namespaces (nova_structures, hopo, dungeons_plus, explorify, ati, …)
+#   - datapack overhauls that keep or replace minecraft:* ids (DnT stronghold, etc.)
+# keep-air-ids is only an explicit force-keep override for edge cases.
+#
+# place-hollow-carve: ONLY for /embedize place of beard_box (ancient_city).
+# Uses a soft ellipsoid (not a hard cube). Natural generation applies a per-piece
+# soft beard stand-in before placeInChunk — streets/plazas need density-style
+# clearance; building interiors already clear via template AIR. Never digs the
+# StructureStart AABB hull (that caused fake floating caverns).
+structures:
+  surface-ignore-air: true
+  place-hollow-carve: true
+  # Optional force-keep overrides (full id, path, or :path suffix)
+  keep-air-ids:
+    - minecraft:ancient_city
+    - minecraft:stronghold
+    - minecraft:trial_chambers
+    - minecraft:mineshaft
+    - minecraft:mineshaft_mesa
+    - minecraft:monument
+    - minecraft:buried_treasure
+    - minecraft:fortress
+    - minecraft:bastion_remnant
+    - minecraft:end_city
 
-# If a structure namespace is not in any group:
-#   false = leave alone (PASS)
-#   true  = deny in all worlds
-manage-ungrouped: false
-
-deny-unresolved-structure-keys: false
-debug-cancellations: false
-
-datapacks:
-  # Optional datapack that maps TerraformGenerator custom biomes into DnT biome tags.
-  # TFG has no public plugin API — this is a datapack workaround only.
-  # Custom biomes: muddy_bog, cherry_grove, scarlet_forest, crystalline_cluster
-  install-tfg-bridge: true
-  install-directory: default-world
-
-multiverse:
-  # Resolve Multiverse world aliases when matching groups.yml allowed-worlds
-  # Uses Multiverse-Core 5 API (MultiverseCoreApi / WorldManager). Soft-depend.
-  resolve-aliases: true
+resource-reset:
+  enabled: true
+  world: resource
+  alias: 资源世界
+  fallback-world: world
+  generator: Embedize
+  use-plugin-generator: true
+  radius: 10000
+  settle-seconds: 5
+  lock-timeout-minutes: 20
+  schedule:
+    enabled: true
+    day-of-month: 1
+    hour: 4
+    minute: 0

@@ -1,6 +1,0 @@
-{
-  "replace": false,
-  "values": [
-    { "id": "terraformgenerator:scarlet_forest", "required": false }
-  ]
-}

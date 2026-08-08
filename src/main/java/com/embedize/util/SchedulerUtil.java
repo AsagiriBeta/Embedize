@@ -1,6 +1,7 @@
 package com.embedize.util;
 
 import org.bukkit.Bukkit;
+import org.bukkit.Location;
 import org.bukkit.plugin.Plugin;
 
 import java.util.concurrent.TimeUnit;
@@ -41,6 +42,14 @@ public final class SchedulerUtil {
 
     public static void runForEntity(Plugin plugin, org.bukkit.entity.Entity entity, Runnable task) {
         entity.getScheduler().run(plugin, scheduled -> task.run(), null);
+    }
+
+    public static void runForLocation(Plugin plugin, Location location, Runnable task) {
+        if (location.getWorld() == null) {
+            runGlobal(plugin, task);
+            return;
+        }
+        Bukkit.getRegionScheduler().execute(plugin, location, task);
     }
 
     public static io.papermc.paper.threadedregions.scheduler.ScheduledTask runGlobalTimer(

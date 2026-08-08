@@ -3,7 +3,7 @@
 build/
 !gradle/wrapper/gradle-wrapper.jar
 
-# --- Java / Kotlin ---
+# --- Java ---
 *.class
 *.jar
 !gradle/wrapper/gradle-wrapper.jar
@@ -12,6 +12,18 @@ build/
 *.nar
 hs_err_pid*
 replay_pid*
+*.hprof
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
 
 # --- IDE ---
 .idea/
@@ -46,18 +58,33 @@ Desktop.ini
 *.pid
 logs/
 
-# --- Local Minecraft / Paper test servers ---
-test-server/
+# --- Local run / toolchain (run-paper + portable JDK) ---
 run/
+.jdk21/
+test-server/
 paper/
 server/
 servers/
+.paper-cache/
+.cache/
 
-# --- Local plugin runtime data (if ever created in-repo) ---
-plugins/
-!src/**/plugins/
-plugins/Embedize/
-plugins/Embedize/cache/
+# --- Accidental world folders at repo root (never commit) ---
+/world/
+/world_nether/
+/world_the_end/
+/resource/
+/resource_nether/
+/resource_end/
+/resource-nether/
+/resource-end/
+
+# --- Reference sources (large extracts; not committed) ---
+.ref/
+
+# --- Structure datapack build output lives under build/ ---
+/structure-library/
+/embedize-structures/
+/embedize-structure-packs/
 
 # --- Secrets / local overrides ---
 *.env
@@ -65,8 +92,21 @@ plugins/Embedize/cache/
 !.env.example
 local.properties
 secrets/
+credentials*.json
+**/service-account*.json
 
 # --- Cursor / agent artifacts ---
 .cursor/
-*.mp4
+.claude/
+.codex/
+.agent/
+agent-transcripts/
+assets/
 artifacts/
+*.mp4
+*.canvas.tsx
+
+# --- Accidental local archives at repo root ---
+/*.zip
+BetterStructures-master.zip
+TerraformGenerator-master.zip

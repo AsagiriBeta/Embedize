@@ -1,75 +1,101 @@
 # Embedize
 
-Paper / Folia 插件：按世界隔离结构数据包自然生成，并提供按世界名持久化的隐形边界。
+**GPLv3** · Paper / Folia **1.21.11** · 自研三维地形 + `embedize:*` 自定义群系 + **原版结构 / jigsaw 引擎**
 
-要求：Paper（或 Folia）**1.21+**，Java **21**。
+结构内容在构建期按来源包分别打入 jar 内 `/embedize-structure-packs/`，经 Bootstrap 按 `index.json` 注册进原版 Registry；
+Embedize 生成器开启 `shouldGenerateStructures()`，由 Minecraft 自己的 StructureSet / `JigsawPlacement` 拼接。
+Multiverse `--generator Embedize` 走 Java 地形 + 原版结构；未选 Embedize 的世界保持完全原版。
 
-## 功能
+| 维度 | Generator ID | 灵感方向 |
+|------|----------------|----------|
+| 主世界 | `Embedize` | 大陆连续坡、海岸、深海地表群系、洞穴（含 deep_dark / lush / dripstone） |
+| 下界 | `Embedize:nether` | Incendium 风气候层 + cheese 洞穴 |
+| 末地 | `Embedize:end` | Nullscape 风格中环 / 外岛 |
 
-- **结构隔离**：拦截 `AsyncStructureSpawnEvent`，按分组白名单控制数据包结构生成；不修改原版 `minecraft:` 结构。
-- **隐形边界**：插件侧回弹（非原版世界边界），配置按世界名保存；同名世界重建后仍生效。
-- **Multiverse-Core 5**（可选）：正式 API 接入，支持世界别名解析与安全落点。
-- **TerraformGenerator**（可选）：无公开插件 API；可自动安装 biome-tag 桥接数据包。
-- 不提供第三方数据包下载；结构包由服主自行放入世界 `datapacks/`。
+## 目录结构
 
-## 安装
+```text
+Embedize/
+├── src/                    # 插件源码与内嵌 biome 数据包
+├── scripts/                # 构建结构数据包 / 生成群系
+├── docs/                   # 设计与参考说明
+├── .ref/                   # 本地参考包（datapacks/ + plugins/，gitignore）
+├── build/                  # Gradle 输出（含 embedize-structure-packs）
+├── run/                    # run-paper 测试服（gitignore）
+└── .jdk21/                 # 可选便携 JDK（gitignore）
+```
 
-1. 构建：`./gradlew jar`，得到 `build/libs/Embedize-1.1.0.jar`
-2. 将 jar 放入服务器 `plugins/`
-3. （可选）安装 Multiverse-Core 5.7+、LuckPerms、TerraformGenerator
-4. 将结构数据包放入目标世界的 `datapacks/`
-5. 编辑 `plugins/Embedize/groups.yml`，配置命名空间与允许世界
-6. 按需设置边界，例如：`/embedize border resource set 5000 spawn`
+## 构建与安装
+
+正式服必须使用**含结构数据包的完整 jar**（`jar` / `fullJar` 产物内容相同；`fullJar` 带 `-full` 分类名，便于识别）。
+
+```bash
+# 将 DnT / T&T / Trek 等 zip 放入 .ref/datapacks/ 后构建
+./gradlew fullJar
+# 等价：./gradlew jar   （同样会跑 buildStructureDatapack 并打入结构包）
+
+# 仅跑测试（不强制产出安装用 jar）
+./gradlew test
+
+# 拉起 Paper 测试服（使用含结构包的 jar）
+./gradlew runServer
+```
+
+| 产物 | 路径 |
+|------|------|
+| 推荐安装 | `build/libs/Embedize-<version>-full.jar` |
+| 同等完整 | `build/libs/Embedize-<version>.jar` |
+
+复制上述任一完整 jar 到服务器 `plugins/`。缺少 `.ref/datapacks/` 时 `buildStructureDatapack` 会失败——正式分发请在有参考包的环境构建。
+
+## 资源世界 / Multiverse / resreset
+
+创建世界：
+
+```text
+mv create resource normal --generator Embedize
+mv create resource-nether nether --generator Embedize:nether
+mv create resource-end the_end --generator Embedize:end
+```
+
+- 无世界白名单：只有选了 Embedize 生成器的世界走自定义地形；默认 `world` 等保持原版。
+- `/resreset` / `/resresetstatus`：按 `config.yml` 的 `resource-reset` 月更/手动重建资源世界。
+- 重置路径：Multiverse **不存盘卸载** + Bukkit `WorldCreator`（`keepSpawnLoaded=false`）再登记，避免主线程卡在选出生点导致玩家被踢。
+- 需要 Multiverse-Core；可选 PlaceholderAPI：`%resource_reset_next%` / `%resource_reset_countdown%` 等。
+
+## 结构行为（自然生成 vs place）
+
+| 场景 | 行为 |
+|------|------|
+| **自然生成** | 原版 StructureSet / jigsaw；装饰前放置；村庄道路依赖 `WORLD_SURFACE_WG` heightmap |
+| **`/embedize place`** | 原版 `/place structure`；可强制加载区块；古城可按配置做软椭球掏空（非整盒） |
+| **surface-ignore-air** | 地表结构：模板 AIR 不覆盖已有方块；地下/空腔结构按 step / adaptation 判定 **keep-air** |
+| **古城 soft beard** | 自然生成按**件** bounding box 软让路，不做 StructureStart AABB 硬掏 |
+
+NBT 模板路径为 1.21+ 的 `data/<ns>/structure/*.nbt`（单数）；构建期会把旧式 `structures/` 改写到该路径。多包分别输出；末地 biome tag 不会误回落 overworld。
+
+## 已知限制
+
+- **旧区块不自愈**：已生成区块不会因升级自动改地形/群系/结构空隙；需新区块或 `/resreset`。
+- **沙盘 / place 仍可填河**：手动 place 与部分地形交互不等于原版生成路径。
+- **soft beard ≠ 原版密度 1:1**：街道/广场更通透，但不是 Beardifier 密度场的完美复刻。
+- **不做「完美无缝」承诺**：与 Terralith 等数据包地形不是像素级一致；覆盖与密度会有偏差。
 
 ## 命令
 
-别名：`/emb`、`/ez`
+`/embedize reload|status|worlds|packs|gens|border|place|help`
 
-```
-/embedize reload | status | worlds | help
+资源世界：`/resreset` · `/resresetstatus` · `/resresetunlock`
 
-/embedize group list
-/embedize group create <id> [display]
-/embedize group delete <id>
-/embedize group <id> info
-/embedize group <id> add|remove <pack>
-/embedize group <id> allowlist add|remove <world>
+## 文档
 
-/embedize border list
-/embedize border <world> info|clear
-/embedize border <world> set <radius> [x z|spawn]
-/embedize border <world> set <rx> <rz> <x> <z>
-/embedize border <world> shape square|round
-```
-
-## 配置
-
-| 文件 | 说明 |
+| 文档 | 内容 |
 |------|------|
-| `config.yml` | 总开关、未分组策略、TFG 桥接、Multiverse 别名 |
-| `groups.yml` | 结构分组：`packs` / `namespaces` / `allowed-worlds` |
-| `borders.yml` | 按世界名的隐形边界 |
+| [docs/SYNTHESIS.md](docs/SYNTHESIS.md) | 架构、群系意图、地形与结构管线 |
+| [docs/REFERENCE.md](docs/REFERENCE.md) | 参考包放置、构建提取、本地目录约定 |
+| [docs/TESTING.md](docs/TESTING.md) | 单元测试 / 世界隔离验收门禁 |
+| [scripts/README.md](scripts/README.md) | 构建 / 运维脚本说明 |
 
-## 权限
+## License
 
-| 权限 | 说明 |
-|------|------|
-| `embedize.admin` | 全部管理权限 |
-| `embedize.group.admin` | 管理结构分组 |
-| `embedize.border.admin` | 管理隐形边界 |
-| `embedize.border.bypass` | 忽略隐形边界 |
-| `embedize.command.reload` | 重载配置 |
-| `embedize.command.status` | 查看状态 |
-
-## 构建依赖
-
-| 依赖 | 范围 |
-|------|------|
-| Paper API 1.21.4+ | 必需 |
-| Multiverse-Core 5.7+ | softdepend |
-| LuckPerms API | softdepend |
-| TerraformGenerator | softdepend |
-
-## 许可
-
-见 [LICENSE](LICENSE)。
+GPLv3 — see [LICENSE](LICENSE).

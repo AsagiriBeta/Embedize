@@ -2,6 +2,7 @@ package com.embedize.compat.multiverse;
 
 import com.embedize.EmbedizePlugin;
 import com.embedize.compat.MultiverseAccess;
+import com.embedize.terrain.EmbedizeGenerator;
 import org.bukkit.Bukkit;
 import org.bukkit.Location;
 import org.bukkit.World;
@@ -18,11 +19,12 @@ import org.mvplugins.multiverse.core.event.world.MVWorldLoadedEvent;
 import org.mvplugins.multiverse.core.event.world.MVWorldRegeneratedEvent;
 import org.mvplugins.multiverse.core.world.MultiverseWorld;
 import org.mvplugins.multiverse.core.world.WorldManager;
+import org.mvplugins.multiverse.core.world.options.ImportWorldOptions;
+import org.mvplugins.multiverse.core.world.options.RemoveWorldOptions;
 import org.mvplugins.multiverse.external.vavr.control.Option;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Locale;
 import java.util.Optional;
 import java.util.logging.Level;
 
@@ -169,44 +171,6 @@ public final class MultiverseAccessImpl implements MultiverseAccess, Listener {
     }
 
     @Override
-    public boolean matchesConfiguredWorld(String bukkitWorldName, Iterable<String> configured) {
-        if (bukkitWorldName == null) {
-            return false;
-        }
-        String needle = bukkitWorldName.toLowerCase(Locale.ROOT);
-        Optional<String> alias = getWorldAlias(bukkitWorldName).map(a -> a.toLowerCase(Locale.ROOT));
-
-        for (String configuredWorld : configured) {
-            if (configuredWorld == null || configuredWorld.isBlank()) {
-                continue;
-            }
-            if (configuredWorld.equalsIgnoreCase(bukkitWorldName)) {
-                return true;
-            }
-            if (alias.isPresent() && configuredWorld.equalsIgnoreCase(alias.get())) {
-                return true;
-            }
-            // Config may store an alias; resolve to canonical name
-            Optional<String> resolved = resolveWorldName(configuredWorld);
-            if (resolved.isPresent() && resolved.get().equalsIgnoreCase(bukkitWorldName)) {
-                return true;
-            }
-            // Also accept getAliasOrName equality
-            Optional<MultiverseWorld> mv = findMvWorld(configuredWorld);
-            if (mv.isPresent()) {
-                String aliasOrName = mv.get().getAliasOrName();
-                if (aliasOrName != null && aliasOrName.toLowerCase(Locale.ROOT).equals(needle)) {
-                    return true;
-                }
-                if (mv.get().getName().equalsIgnoreCase(bukkitWorldName)) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
-    @Override
     public List<String> listManagedWorldNames() {
         return worldManager()
                 .map(mgr -> {
@@ -223,6 +187,91 @@ public final class MultiverseAccessImpl implements MultiverseAccess, Listener {
     @Override
     public boolean isManagedWorld(String worldName) {
         return findMvWorld(worldName).isPresent();
+    }
+
+    @Override
+    public boolean detachWorldForReset(String worldName) {
+        if (worldName == null || worldName.isBlank() || api == null) {
+            return false;
+        }
+        Optional<WorldManager> mgrOpt = worldManager();
+        Optional<MultiverseWorld> mvOpt = findMvWorld(worldName);
+        if (mgrOpt.isEmpty() || mvOpt.isEmpty()) {
+            return false;
+        }
+        WorldManager mgr = mgrOpt.get();
+        MultiverseWorld mvWorld = mvOpt.get();
+        try {
+            // removeWorld: unload (save=false) then drop config — never re-load to delete.
+            RemoveWorldOptions options = RemoveWorldOptions.world(mvWorld)
+                    .saveBukkitWorld(false)
+                    .unloadBukkitWorld(true);
+            var result = mgr.removeWorld(options);
+            boolean ok = result.isSuccess();
+            plugin.getLogger().info("[resource-reset] Multiverse removeWorld('" + worldName
+                    + "', save=false) => " + (ok ? "ok" : String.valueOf(result)));
+            return ok;
+        } catch (Throwable t) {
+            plugin.getLogger().log(Level.WARNING,
+                    "[resource-reset] Multiverse detachWorldForReset failed for '" + worldName + "'", t);
+            return false;
+        }
+    }
+
+    @Override
+    public boolean registerLoadedWorld(World world, String generator) {
+        if (world == null || api == null) {
+            return false;
+        }
+        if (isManagedWorld(world.getName())) {
+            return true;
+        }
+        Optional<WorldManager> mgrOpt = worldManager();
+        if (mgrOpt.isEmpty()) {
+            return false;
+        }
+        try {
+            ImportWorldOptions options = ImportWorldOptions.worldName(world.getName())
+                    .environment(world.getEnvironment())
+                    .useSpawnAdjust(false)
+                    .doFolderCheck(false);
+            if (generator != null && !generator.isBlank()) {
+                options = options.generator(generator);
+            }
+            var result = mgrOpt.get().importWorld(options);
+            boolean ok = result.isSuccess();
+            plugin.getLogger().info("[resource-reset] Multiverse importWorld(already-loaded '"
+                    + world.getName() + "') => " + (ok ? "ok" : String.valueOf(result)));
+            return ok;
+        } catch (Throwable t) {
+            plugin.getLogger().log(Level.WARNING,
+                    "[resource-reset] Multiverse registerLoadedWorld failed for '"
+                            + world.getName() + "'", t);
+            return false;
+        }
+    }
+
+    @Override
+    public boolean configureResourceWorld(String worldName, String alias) {
+        Optional<MultiverseWorld> mvOpt = findMvWorld(worldName);
+        if (mvOpt.isEmpty()) {
+            return false;
+        }
+        MultiverseWorld mv = mvOpt.get();
+        try {
+            if (alias != null && !alias.isBlank()) {
+                mv.setAlias(alias);
+            }
+            mv.setAdjustSpawn(false);
+            mv.setKeepSpawnInMemory(false);
+            worldManager().ifPresent(mgr -> mgr.saveWorldsConfig());
+            return true;
+        } catch (Throwable t) {
+            plugin.getLogger().log(Level.WARNING,
+                    "[resource-reset] Multiverse configureResourceWorld failed for '"
+                            + worldName + "'", t);
+            return false;
+        }
     }
 
     @Override
@@ -292,6 +341,21 @@ public final class MultiverseAccessImpl implements MultiverseAccess, Listener {
         if (plugin.getBorderManager() != null) {
             plugin.getBorderManager().onWorldReady(name);
         }
+        World bukkitWorld = Bukkit.getWorld(name);
+        if (bukkitWorld == null) {
+            return;
+        }
+        if (bukkitWorld.getGenerator() instanceof EmbedizeGenerator generator) {
+            if (plugin.getTerrainWorldListener() != null) {
+                plugin.getTerrainWorldListener().refreshWorld(bukkitWorld);
+            }
+            plugin.getLogger().info("Verified MV Embedize world '" + name + "' generator="
+                    + generator.kind() + " id=" + generator.generatorId()
+                    + " (" + reason + ")");
+        } else if (bukkitWorld.getGenerator() != null) {
+            plugin.getLogger().fine("MV world '" + name + "' uses non-Embedize generator "
+                    + bukkitWorld.getGenerator().getClass().getSimpleName() + " (" + reason + ")");
+        }
     }
 
     private void syncKnownWorlds(String reason) {
@@ -299,6 +363,12 @@ public final class MultiverseAccessImpl implements MultiverseAccess, Listener {
             plugin.getLogger().fine("MV sync world '" + name + "' (" + reason + ")");
             if (plugin.getBorderManager() != null) {
                 plugin.getBorderManager().onWorldReady(name);
+            }
+            World bukkitWorld = Bukkit.getWorld(name);
+            if (bukkitWorld != null
+                    && bukkitWorld.getGenerator() instanceof EmbedizeGenerator
+                    && plugin.getTerrainWorldListener() != null) {
+                plugin.getTerrainWorldListener().refreshWorld(bukkitWorld);
             }
         }
     }
