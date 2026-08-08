@@ -786,6 +786,114 @@ def strip_broken_vanilla_structure_overrides(pack_root: Path, known_pools: set[s
     return removed
 
 
+def collect_structure_ids(pack_root: Path) -> set[str]:
+    """Ids like redsmorestructures:jungle_pyramid present as worldgen/structure/*.json."""
+    ids: set[str] = set()
+    data = pack_root / "data"
+    if not data.is_dir():
+        return ids
+    for p in data.rglob("*.json"):
+        rel = p.relative_to(data).as_posix().replace("\\", "/")
+        low = rel.lower()
+        if "/tags/" in low or "/worldgen/structure_set/" in low:
+            continue
+        if "/worldgen/structure/" not in low:
+            continue
+        parts = rel.split("/")
+        try:
+            wg = parts.index("worldgen")
+        except ValueError:
+            continue
+        if wg < 1 or parts[wg - 1] == "tags" or parts[wg + 1] != "structure":
+            continue
+        ns = parts[0]
+        path = "/".join(parts[wg + 2 :])
+        if path.lower().endswith(".json"):
+            path = path[:-5]
+        ids.add(f"{ns}:{path}".lower())
+    return ids
+
+
+def collect_structure_set_ids(pack_root: Path) -> set[str]:
+    ids: set[str] = set()
+    data = pack_root / "data"
+    if not data.is_dir():
+        return ids
+    for p in data.rglob("*.json"):
+        rel = p.relative_to(data).as_posix().replace("\\", "/")
+        low = rel.lower()
+        if "/worldgen/structure_set/" not in low:
+            continue
+        parts = rel.split("/")
+        try:
+            wg = parts.index("worldgen")
+        except ValueError:
+            continue
+        if wg + 1 >= len(parts) or parts[wg + 1] != "structure_set":
+            continue
+        ns = parts[0]
+        path = "/".join(parts[wg + 2 :])
+        if path.lower().endswith(".json"):
+            path = path[:-5]
+        ids.add(f"{ns}:{path}".lower())
+    return ids
+
+
+def prune_orphan_structure_sets(pack_root: Path) -> int:
+    """
+    Remove structure_set JSON whose structures[] point at missing worldgen/structure ids.
+
+    Incomplete ingest (missing structure JSON / NBT while keeping structure_set) causes
+    registry freeze failures: \"Unbound values in registry minecraft:worldgen/structure\".
+    Prefer restoring full packs; this is a safety net so a half-written pack cannot ship.
+    """
+    known = collect_structure_ids(pack_root)
+    data = pack_root / "data"
+    if not data.is_dir():
+        return 0
+    removed = 0
+    for p in sorted(data.rglob("*.json")):
+        rel = p.relative_to(data).as_posix().replace("\\", "/")
+        if "/worldgen/structure_set/" not in rel.lower():
+            continue
+        parsed = load_json_bytes(p.read_bytes())
+        if not isinstance(parsed, dict):
+            print(f"  prune unreadable structure_set {rel}")
+            p.unlink(missing_ok=True)
+            removed += 1
+            continue
+        entries = parsed.get("structures")
+        if not isinstance(entries, list) or not entries:
+            print(f"  prune empty structure_set {rel}")
+            p.unlink(missing_ok=True)
+            removed += 1
+            continue
+        missing = []
+        for ent in entries:
+            if not isinstance(ent, dict):
+                continue
+            sid = ent.get("structure")
+            if isinstance(sid, str) and sid.lower() not in known:
+                missing.append(sid)
+        if missing:
+            print(f"  prune orphan structure_set {rel} (missing {', '.join(missing)})")
+            p.unlink(missing_ok=True)
+            removed += 1
+    return removed
+
+
+def assert_pack_not_hollow(pack_root: Path, slug: str) -> None:
+    """Fail loud if structure_sets exist but no structure defs (classic hollow-pack bug)."""
+    sets = collect_structure_set_ids(pack_root)
+    structs = collect_structure_ids(pack_root)
+    if sets and not structs:
+        raise RuntimeError(
+            f"Hollow structure pack {slug}: {len(sets)} structure_set(s) but 0 "
+            f"worldgen/structure JSON. Re-ingest source; refusing to ship "
+            f"(would unbound-freeze on Leaves/Paper)."
+        )
+
+
 def sanitize_pack_biome_tags(out_root: Path) -> int:
     n = 0
     data = out_root / "data"
@@ -970,6 +1078,8 @@ def main() -> int:
         pools = collect_template_pool_ids(pack_root)
         stripped = strip_broken_vanilla_structure_overrides(pack_root, pools)
         stub_n = stub_missing_placed_features(pack_root)
+        orphan_sets = prune_orphan_structure_sets(pack_root)
+        assert_pack_not_hollow(pack_root, slug)
         write_pack_mcmeta(pack_root, f"Embedize structure pack: {source.name}")
 
         structures, disk_nbt, disk_json = collect_structures(pack_root, source.name)
@@ -986,13 +1096,14 @@ def main() -> int:
             "structures": len(structures),
             "structureBiomesRewritten": struct_n,
             "brokenVanillaOverridesStripped": stripped,
+            "orphanStructureSetsPruned": orphan_sets,
             "placedFeatureStubs": stub_n,
             "overhaul": is_overhaul_slug(slug),
         })
         print(
             f"  nbt={nbt_n} json={json_n} tags={tag_n} "
             f"structure_biomes={struct_n} stripped_overrides={stripped} "
-            f"stubs={stub_n} structures={len(structures)}"
+            f"orphan_sets={orphan_sets} stubs={stub_n} structures={len(structures)}"
         )
 
     build_bridge_pack(OUT)

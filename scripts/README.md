@@ -8,3 +8,5 @@
 需要本机 `python` 在 PATH 中。`jar` / `fullJar` 都会跑 `buildStructureDatapack` 并将 `/embedize-structure-packs/` 打入分发 jar（正式服用 `build/libs/Embedize-*-full.jar`）。
 
 结构拼接由 **Minecraft 原版 jigsaw / StructureSet 引擎**完成，不再使用自研装配器。不跨包合并文件，避免 template pool 与 NBT 错配。
+
+完整性：构建会剪掉引用缺失 structure 的 `structure_set`，并拒绝「有 set 无 structure」的空心包（曾导致正式服 registry freeze）。

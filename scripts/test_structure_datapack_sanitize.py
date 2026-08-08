@@ -91,6 +91,36 @@ def main() -> int:
         set(bsd.empty_tag_fallback("c:unknown_biome_xyz")) == OW,
     )
 
+    # Hollow pack guard: structure_set without structure defs must be pruned / refused
+    import tempfile
+    from pathlib import Path as P
+    with tempfile.TemporaryDirectory() as td:
+        root = P(td)
+        ss = root / "data" / "demo" / "worldgen" / "structure_set"
+        ss.mkdir(parents=True)
+        (ss / "ghost.json").write_text(
+            json.dumps({
+                "structures": [{"structure": "demo:ghost", "weight": 1}],
+                "placement": {"type": "minecraft:random_spread", "spacing": 10, "separation": 5, "salt": 1},
+            }),
+            encoding="utf-8",
+        )
+        pruned = bsd.prune_orphan_structure_sets(root)
+        check("prune orphan structure_set", pruned == 1 and not (ss / "ghost.json").exists())
+        # recreate hollow and assert fail-loud
+        (ss / "ghost.json").write_text(
+            json.dumps({
+                "structures": [{"structure": "demo:ghost", "weight": 1}],
+                "placement": {"type": "minecraft:random_spread", "spacing": 10, "separation": 5, "salt": 1},
+            }),
+            encoding="utf-8",
+        )
+        try:
+            bsd.assert_pack_not_hollow(root, "demo_hollow")
+            check("assert hollow raises", False)
+        except RuntimeError:
+            check("assert hollow raises", True)
+
     print("failed=", failed)
     return 1 if failed else 0
 

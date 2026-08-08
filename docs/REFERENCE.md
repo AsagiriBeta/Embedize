@@ -18,6 +18,11 @@ NBT 落在 1.21+ 单数路径 `data/<ns>/structure/*.nbt`（旧 `structures/` �
 再打进插件 jar 的 `/embedize-structure-packs/`，由 Bootstrap `DATAPACK_DISCOVERY` 按 load order 注册。
 末地相关 biome tag 按维度清洗，不会误回落 overworld。
 
+构建期会校验：若 `structure_set` 引用了不存在的 `worldgen/structure`，会剪掉悬空 set；
+若整包只剩 structure_set、没有任何 structure JSON（空心包），构建直接失败——
+这类残缺产物会在 Leaves/Paper 上触发 `Unbound values in registry minecraft:worldgen/structure`。
+热门结构包（如 Reds Structure）源 zip 自洽时，问题出在 Embedize 构建产物而非上游包。
+
 ## Typical roles
 
 | Kind | Examples |
